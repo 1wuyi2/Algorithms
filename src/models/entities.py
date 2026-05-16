@@ -9,7 +9,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Optional, Tuple, FrozenSet
+from typing import FrozenSet, Optional, Tuple
+
+
+class Campus(str, Enum):
+    """Supported campus values for Nankai-oriented scheduling."""
+
+    JINNAN = "jinnan"
+    BALITAI = "balitai"
 
 
 class RoomType(str, Enum):
@@ -52,6 +59,7 @@ class Teacher:
     name: str
     unavailable_time_slot_ids: FrozenSet[str] = field(default_factory=frozenset)
     available_course_ids: FrozenSet[str] = field(default_factory=frozenset)
+    campus_preferences: FrozenSet[Campus] = field(default_factory=frozenset)
 
     def __post_init__(self) -> None:
         if not self.id:
@@ -60,6 +68,7 @@ class Teacher:
             raise ValueError("Teacher.name cannot be empty")
         object.__setattr__(self, "unavailable_time_slot_ids", frozenset(self.unavailable_time_slot_ids))
         object.__setattr__(self, "available_course_ids", frozenset(self.available_course_ids))
+        object.__setattr__(self, "campus_preferences", frozenset(self.campus_preferences))
 
 
 @dataclass(frozen=True)
@@ -71,6 +80,7 @@ class ClassGroup:
     major: Optional[str] = None
     grade: Optional[str] = None
     student_count: int = 0
+    campus: Optional[Campus] = None
 
     def __post_init__(self) -> None:
         if not self.id:
@@ -89,6 +99,8 @@ class Room:
     name: str
     capacity: int
     room_type: RoomType = RoomType.GENERAL
+    campus: Optional[Campus] = None
+    building: Optional[str] = None
     available_time_slot_ids: FrozenSet[str] = field(default_factory=frozenset)
 
     def __post_init__(self) -> None:
@@ -111,6 +123,7 @@ class Course:
     class_group_ids: Tuple[str, ...]
     weekly_hours: int
     required_room_type: RoomType = RoomType.GENERAL
+    required_campus: Optional[Campus] = None
     expected_students: Optional[int] = None
     fixed_time_slot_id: Optional[str] = None
     candidate_time_slot_ids: Tuple[str, ...] = field(default_factory=tuple)

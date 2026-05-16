@@ -1,6 +1,7 @@
 ﻿"""Data model exports."""
 
 from .entities import (
+    Campus,
     ClassGroup,
     Course,
     Room,
@@ -11,6 +12,7 @@ from .entities import (
 )
 
 __all__ = [
+    "Campus",
     "ClassGroup",
     "Course",
     "Room",
