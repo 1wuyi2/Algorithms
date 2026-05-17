@@ -81,6 +81,7 @@ class ClassGroup:
     grade: Optional[str] = None
     student_count: int = 0
     campus: Optional[Campus] = None
+    unavailable_time_slot_ids: FrozenSet[str] = field(default_factory=frozenset)
 
     def __post_init__(self) -> None:
         if not self.id:
@@ -89,6 +90,7 @@ class ClassGroup:
             raise ValueError("ClassGroup.name cannot be empty")
         if self.student_count < 0:
             raise ValueError("ClassGroup.student_count cannot be negative")
+        object.__setattr__(self, "unavailable_time_slot_ids", frozenset(self.unavailable_time_slot_ids))
 
 
 @dataclass(frozen=True)
@@ -161,3 +163,4 @@ class ScheduleAssignment:
             raise ValueError("ScheduleAssignment.course_id cannot be empty")
         if not self.time_slot_id:
             raise ValueError("ScheduleAssignment.time_slot_id cannot be empty")
+

@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>南开大学学院排课系统 - 老师端</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="brand">
+          <div class="brand-mark">NK</div>
+          <div>
+            <h1>学院排课系统</h1>
+            <p>老师端工作台</p>
+          </div>
+        </div>
+        <nav class="nav-tabs" aria-label="老师端模块">
+          <button class="nav-tab active" data-view="data">基础数据</button>
+          <button class="nav-tab" data-view="schedule">自动排课</button>
+          <button class="nav-tab" data-view="table">课表展示</button>
+          <button class="nav-tab" data-view="issues">冲突提示</button>
+        </nav>
+      </aside>
+
+      <main class="workspace">
+        <section class="topbar">
+          <div>
+            <p class="eyebrow">Nankai University</p>
+            <h2>学院级智能排课</h2>
+          </div>
+          <div class="status-grid" aria-label="系统状态">
+            <div>
+              <span id="courseCount">0</span>
+              <small>课程</small>
+            </div>
+            <div>
+              <span id="teacherCount">0</span>
+              <small>教师</small>
+            </div>
+            <div>
+              <span id="roomCount">0</span>
+              <small>教室</small>
+            </div>
+          </div>
+        </section>
+
+        <section class="view active" id="view-data">
+          <div class="section-heading">
+            <div>
+              <h3>基础数据管理</h3>
+              <p>当前阶段可手动录入少量测试数据，后续接入 PDF/CSV 导入模块。</p>
+            </div>
+          </div>
+
+          <div class="data-grid">
+            <form class="panel compact-form" id="courseForm">
+              <h4>新增课程</h4>
+              <label>
+                课程编号
+                <input name="id" required placeholder="C001" />
+              </label>
+              <label>
+                课程名称
+                <input name="name" required placeholder="算法设计" />
+              </label>
+              <label>
+                教师编号
+                <input name="teacherId" required placeholder="T001" />
+              </label>
+              <label>
+                班级编号
+                <input name="classGroupId" required placeholder="G001" />
+              </label>
+              <button type="submit">添加课程</button>
+            </form>
+
+            <form class="panel compact-form" id="teacherForm">
+              <h4>新增教师</h4>
+              <label>
+                教师编号
+                <input name="id" required placeholder="T001" />
+              </label>
+              <label>
+                教师姓名
+                <input name="name" required placeholder="教师姓名" />
+              </label>
+              <button type="submit">添加教师</button>
+            </form>
+
+            <form class="panel compact-form" id="roomForm">
+              <h4>新增教室</h4>
+              <label>
+                教室编号
+                <input name="id" required placeholder="R001" />
+              </label>
+              <label>
+                教室名称
+                <input name="name" required placeholder="津南教学楼 A101" />
+              </label>
+              <label>
+                容量
+                <input name="capacity" required type="number" min="1" placeholder="60" />
+              </label>
+              <button type="submit">添加教室</button>
+            </form>
+          </div>
+
+          <div class="panel table-panel">
+            <div class="panel-title">
+              <h4>已录入课程</h4>
+              <button class="ghost-button" id="clearDataButton" type="button">清空测试数据</button>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>课程编号</th>
+                    <th>课程名称</th>
+                    <th>教师</th>
+                    <th>班级</th>
+                  </tr>
+                </thead>
+                <tbody id="courseTableBody"></tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <section class="view" id="view-schedule">
+          <div class="section-heading">
+            <div>
+              <h3>自动排课</h3>
+              <p>这里预留与 Python 排课算法的接口，后续网站后端接入后可直接运行。</p>
+            </div>
+          </div>
+          <div class="panel run-panel">
+            <div>
+              <h4>算法选择</h4>
+              <div class="segmented">
+                <button class="selected" type="button">贪心图染色</button>
+                <button type="button">回溯搜索</button>
+              </div>
+            </div>
+            <button id="runScheduleButton" type="button">生成课表</button>
+          </div>
+          <div class="notice" id="scheduleNotice">
+            当前页面尚未接入后端接口。已有的 Python 模块位于 src/algorithms/，后续可通过 API 返回排课结果。
+          </div>
+        </section>
+
+        <section class="view" id="view-table">
+          <div class="section-heading">
+            <div>
+              <h3>课表展示</h3>
+              <p>后续支持按教师、班级、教室查看排课结果。</p>
+            </div>
+          </div>
+          <div class="panel timetable">
+            <div class="empty-state">暂无排课结果</div>
+          </div>
+        </section>
+
+        <section class="view" id="view-issues">
+          <div class="section-heading">
+            <div>
+              <h3>冲突提示</h3>
+              <p>展示冲突检测和课表评价模块返回的问题。</p>
+            </div>
+          </div>
+          <div class="panel issue-list" id="issueList">
+            <div class="empty-state">暂无冲突信息</div>
+          </div>
+        </section>
+      </main>
+    </div>
+    <script src="./app.js"></script>
+  </body>
+</html>
