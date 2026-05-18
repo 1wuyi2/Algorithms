@@ -3,6 +3,7 @@
 import unittest
 
 from src.api import (
+    analyze_schedule_payload,
     evaluate_schedule_payload,
     health_response,
     run_backtracking_schedule,
@@ -91,6 +92,24 @@ class ApiServiceTests(unittest.TestCase):
         self.assertFalse(response["is_feasible"])
         self.assertLess(response["score"], 100)
         self.assertTrue(response["errors"])
+
+    def test_analyze_schedule_payload(self):
+        payload = {
+            "courses": [
+                course("C001", "T001", ("G001",)),
+                course("C002", "T001", ("G002",)),
+            ],
+            "time_slots": [
+                time_slot("D1-S1", 1),
+                time_slot("D1-S2", 2),
+            ],
+        }
+
+        response = analyze_schedule_payload(payload)
+
+        self.assertIn(response["risk_level"], {"low", "medium", "high"})
+        self.assertIn("metrics", response)
+        self.assertTrue(response["suggestions"])
 
     def test_rejects_missing_required_fields(self):
         with self.assertRaises(ValueError):
