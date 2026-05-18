@@ -12,6 +12,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Callable, Mapping
 
 from .services import (
+    analyze_schedule_payload,
     evaluate_schedule_payload,
     health_response,
     run_backtracking_schedule,
@@ -26,6 +27,7 @@ POST_ROUTES: dict[str, JsonHandler] = {
     "/schedule/greedy": run_greedy_schedule,
     "/schedule/backtracking": run_backtracking_schedule,
     "/schedule/evaluate": evaluate_schedule_payload,
+    "/assistant/analyze": analyze_schedule_payload,
 }
 
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any, Mapping
 
 from src.algorithms import backtracking_schedule, greedy_color_schedule
+from src.assistant import analyze_schedule
 from src.evaluation import evaluate_schedule
 
 from .schemas import (
@@ -14,6 +15,7 @@ from .schemas import (
     parse_time_slots,
     serialize_assignments,
     serialize_evaluation,
+    serialize_insight,
 )
 
 
@@ -70,3 +72,20 @@ def evaluate_schedule_payload(payload: Mapping[str, Any]) -> dict[str, object]:
     assignments = parse_assignments(payload.get("assignments"))
     rooms = parse_rooms(payload.get("rooms"))
     return serialize_evaluation(evaluate_schedule(courses, assignments, rooms=rooms))
+
+
+def analyze_schedule_payload(payload: Mapping[str, Any]) -> dict[str, object]:
+    """Generate AI-assisted scheduling analysis from JSON-like payload."""
+
+    courses = parse_courses(payload.get("courses"))
+    time_slots = parse_time_slots(payload.get("time_slots") or payload.get("timeSlots"))
+    assignments = parse_assignments(payload.get("assignments"))
+    rooms = parse_rooms(payload.get("rooms"))
+    return serialize_insight(
+        analyze_schedule(
+            courses,
+            time_slots,
+            assignments=assignments,
+            rooms=rooms,
+        )
+    )

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Mapping, Optional, Tuple
 
+from src.assistant import ScheduleInsight, ScheduleSuggestion
 from src.evaluation import EvaluationIssue, ScheduleEvaluationResult
 from src.models import Campus, Course, Room, RoomType, ScheduleAssignment, TimeSlot
 
@@ -54,6 +55,17 @@ def serialize_evaluation(result: ScheduleEvaluationResult) -> dict[str, object]:
         "issues": [_serialize_issue(issue) for issue in result.issues],
         "errors": [_serialize_issue(issue) for issue in result.errors],
         "warnings": [_serialize_issue(issue) for issue in result.warnings],
+    }
+
+
+def serialize_insight(insight: ScheduleInsight) -> dict[str, object]:
+    """Convert an AI-assisted schedule insight to a JSON-serializable dict."""
+
+    return {
+        "risk_level": insight.risk_level.value,
+        "summary": insight.summary,
+        "metrics": dict(insight.metrics),
+        "suggestions": [_serialize_suggestion(suggestion) for suggestion in insight.suggestions],
     }
 
 
@@ -117,6 +129,15 @@ def _serialize_issue(issue: EvaluationIssue) -> dict[str, object]:
         "severity": issue.severity.value,
         "message": issue.message,
         "related_ids": list(issue.related_ids),
+    }
+
+
+def _serialize_suggestion(suggestion: ScheduleSuggestion) -> dict[str, object]:
+    return {
+        "priority": suggestion.priority.value,
+        "title": suggestion.title,
+        "detail": suggestion.detail,
+        "related_ids": list(suggestion.related_ids),
     }
 
 

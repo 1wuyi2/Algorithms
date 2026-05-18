@@ -1,6 +1,7 @@
 """API helpers and service entry points."""
 
 from .services import (
+    analyze_schedule_payload,
     evaluate_schedule_payload,
     health_response,
     run_backtracking_schedule,
@@ -8,6 +9,7 @@ from .services import (
 )
 
 __all__ = [
+    "analyze_schedule_payload",
     "evaluate_schedule_payload",
     "health_response",
     "run_backtracking_schedule",
