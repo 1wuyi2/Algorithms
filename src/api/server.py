@@ -11,8 +11,10 @@ import json
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Callable, Mapping
 
+from .errors import ApiError, error_payload
 from .services import (
     analyze_schedule_payload,
+    compare_schedule_algorithms,
     evaluate_schedule_payload,
     health_response,
     run_backtracking_schedule,
@@ -26,6 +28,7 @@ JsonHandler = Callable[[Mapping[str, Any]], dict[str, object]]
 POST_ROUTES: dict[str, JsonHandler] = {
     "/schedule/greedy": run_greedy_schedule,
     "/schedule/backtracking": run_backtracking_schedule,
+    "/schedule/compare": compare_schedule_algorithms,
     "/schedule/evaluate": evaluate_schedule_payload,
     "/assistant/analyze": analyze_schedule_payload,
 }
@@ -43,22 +46,25 @@ class SchedulingApiHandler(BaseHTTPRequestHandler):
         if self.path == "/health":
             self._send_json(health_response())
             return
-        self._send_json({"error": "Not found"}, status=404)
+        self._send_json(error_payload("NOT_FOUND", "Not found"), status=404)
 
     def do_POST(self) -> None:
         handler = POST_ROUTES.get(self.path)
         if handler is None:
-            self._send_json({"error": "Not found"}, status=404)
+            self._send_json(error_payload("NOT_FOUND", "Not found"), status=404)
             return
 
         try:
             payload = self._read_json_body()
             response = handler(payload)
+        except ApiError as exc:
+            self._send_json(error_payload(exc.code, exc.message), status=exc.status)
+            return
         except ValueError as exc:
-            self._send_json({"error": str(exc)}, status=400)
+            self._send_json(error_payload("VALIDATION_ERROR", str(exc)), status=400)
             return
         except Exception as exc:  # pragma: no cover - final API guard
-            self._send_json({"error": f"Internal server error: {exc}"}, status=500)
+            self._send_json(error_payload("INTERNAL_ERROR", f"Internal server error: {exc}"), status=500)
             return
 
         self._send_json(response)
@@ -72,7 +78,7 @@ class SchedulingApiHandler(BaseHTTPRequestHandler):
         try:
             payload = json.loads(raw_body.decode("utf-8"))
         except json.JSONDecodeError as exc:
-            raise ValueError("Request body must be valid JSON") from exc
+            raise ApiError("INVALID_JSON", "Request body must be valid JSON", status=400) from exc
 
         if not isinstance(payload, Mapping):
             raise ValueError("Request JSON body must be an object")

@@ -16,6 +16,17 @@ from src.models import Course, ScheduleAssignment, TimeSlot
 
 
 @dataclass(frozen=True)
+class BacktrackingFailureDetail:
+    """Detailed failure information for one course during search."""
+
+    course_id: str
+    reason: str
+    candidate_time_slot_ids: Tuple[str, ...] = ()
+    feasible_time_slot_ids: Tuple[str, ...] = ()
+    blocking_course_ids: Tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
 class BacktrackingScheduleResult:
     """Result of backtracking time-slot scheduling."""
 
@@ -24,6 +35,8 @@ class BacktrackingScheduleResult:
     reason: Optional[str]
     conflict_graph: ConflictGraph
     search_steps: int
+    failure_details: Tuple[BacktrackingFailureDetail, ...] = ()
+    stopped_by_limit: bool = False
 
     @property
     def is_complete(self) -> bool:
@@ -79,9 +92,18 @@ def backtracking_schedule(
             reason="Some courses have no available time slot candidates.",
             conflict_graph=graph,
             search_steps=0,
+            failure_details=tuple(
+                BacktrackingFailureDetail(
+                    course_id=course_id,
+                    reason=_no_candidate_reason(course_by_id[course_id], time_slot_ids),
+                    candidate_time_slot_ids=candidates_by_course_id[course_id],
+                )
+                for course_id in failed_course_ids
+            ),
         )
 
     assigned: Dict[str, str] = {}
+    dead_end_details: list[BacktrackingFailureDetail] = []
     steps = 0
     stopped_by_limit = False
 
@@ -96,6 +118,16 @@ def backtracking_schedule(
 
         course_id, feasible_ids = _select_next_course(unassigned_ids, candidates_by_course_id, graph, assigned)
         if not feasible_ids:
+            dead_end_details.append(
+                _build_failure_detail(
+                    course_id,
+                    candidates_by_course_id[course_id],
+                    feasible_ids,
+                    graph,
+                    assigned,
+                    reason="No feasible time slot remains under the current partial assignment.",
+                )
+            )
             return False
 
         remaining_ids = tuple(candidate_id for candidate_id in unassigned_ids if candidate_id != course_id)
@@ -127,6 +159,22 @@ def backtracking_schedule(
 
     unsolved_ids = tuple(course_id for course_id in all_course_ids if course_id not in assigned)
     reason = "Search stopped after reaching max_steps." if stopped_by_limit else "No feasible assignment found."
+    failure_details = _unique_failure_details(dead_end_details)
+    if not failure_details:
+        failure_details = tuple(
+            _build_failure_detail(
+                course_id,
+                candidates_by_course_id[course_id],
+                tuple(
+                    time_slot_id for time_slot_id in candidates_by_course_id[course_id]
+                    if _is_feasible(course_id, time_slot_id, graph, assigned)
+                ),
+                graph,
+                assigned,
+                reason=reason,
+            )
+            for course_id in (unsolved_ids or tuple(course_by_id.keys()))
+        )
     return BacktrackingScheduleResult(
         assignments=tuple(
             ScheduleAssignment(course_id=course.id, time_slot_id=assigned[course.id])
@@ -137,6 +185,8 @@ def backtracking_schedule(
         reason=reason,
         conflict_graph=graph,
         search_steps=steps,
+        failure_details=failure_details,
+        stopped_by_limit=stopped_by_limit,
     )
 
 
@@ -179,6 +229,48 @@ def _candidate_time_slot_ids(
         return tuple(slot_id for slot_id in course.candidate_time_slot_ids if slot_id in time_slot_id_set)
 
     return time_slot_ids
+
+
+def _no_candidate_reason(course: Course, time_slot_ids: Tuple[str, ...]) -> str:
+    if not time_slot_ids:
+        return "No time slots were provided."
+    if course.fixed_time_slot_id is not None:
+        return "The fixed time slot is not included in the available time slots."
+    if course.candidate_time_slot_ids:
+        return "None of the course candidate time slots are included in the available time slots."
+    return "No available time slot candidates for this course."
+
+
+def _build_failure_detail(
+    course_id: str,
+    candidate_time_slot_ids: Tuple[str, ...],
+    feasible_time_slot_ids: Tuple[str, ...],
+    graph: ConflictGraph,
+    assigned: Mapping[str, str],
+    *,
+    reason: str,
+) -> BacktrackingFailureDetail:
+    candidate_id_set = set(candidate_time_slot_ids)
+    blocking_course_ids = tuple(
+        sorted(
+            neighbor_id for neighbor_id in graph.neighbors(course_id)
+            if assigned.get(neighbor_id) in candidate_id_set
+        )
+    )
+    return BacktrackingFailureDetail(
+        course_id=course_id,
+        reason=reason,
+        candidate_time_slot_ids=candidate_time_slot_ids,
+        feasible_time_slot_ids=feasible_time_slot_ids,
+        blocking_course_ids=blocking_course_ids,
+    )
+
+
+def _unique_failure_details(details: list[BacktrackingFailureDetail]) -> Tuple[BacktrackingFailureDetail, ...]:
+    unique_by_course_id: dict[str, BacktrackingFailureDetail] = {}
+    for detail in details:
+        unique_by_course_id.setdefault(detail.course_id, detail)
+    return tuple(unique_by_course_id.values())
 
 
 def _ensure_unique_ids(ids: Iterable[str], entity_name: str) -> None:

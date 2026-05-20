@@ -4,6 +4,8 @@ import unittest
 
 from src.api import (
     analyze_schedule_payload,
+    compare_schedule_algorithms,
+    error_payload,
     evaluate_schedule_payload,
     health_response,
     run_backtracking_schedule,
@@ -38,6 +40,13 @@ class ApiServiceTests(unittest.TestCase):
 
         self.assertEqual(response["status"], "ok")
 
+    def test_error_payload_keeps_simple_error_field(self):
+        response = error_payload("VALIDATION_ERROR", "Missing field")
+
+        self.assertFalse(response["success"])
+        self.assertEqual(response["code"], "VALIDATION_ERROR")
+        self.assertEqual(response["error"], "Missing field")
+
     def test_run_greedy_schedule(self):
         payload = {
             "courses": (
@@ -55,6 +64,25 @@ class ApiServiceTests(unittest.TestCase):
         self.assertEqual(response["algorithm"], "greedy_coloring")
         self.assertTrue(response["is_complete"])
         self.assertEqual(len(response["assignments"]), 2)
+
+    def test_run_greedy_schedule_reports_unscheduled_diagnostics(self):
+        payload = {
+            "courses": (
+                course("C001", "T001", ("G001",)),
+                course("C002", "T001", ("G002",)),
+                course("C003", "T001", ("G003",)),
+            ),
+            "time_slots": (
+                time_slot("D1-S1", 1),
+                time_slot("D1-S2", 2),
+            ),
+        }
+
+        response = run_greedy_schedule(payload)
+
+        self.assertFalse(response["is_complete"])
+        self.assertEqual(response["unscheduled"][0]["candidate_time_slot_ids"], ["D1-S1", "D1-S2"])
+        self.assertEqual(response["unscheduled"][0]["blocking_course_ids"], ["C001", "C002"])
 
     def test_run_backtracking_schedule(self):
         payload = {
@@ -74,6 +102,42 @@ class ApiServiceTests(unittest.TestCase):
         self.assertEqual(response["algorithm"], "backtracking_search")
         self.assertTrue(response["is_complete"])
         self.assertEqual(response["failed_course_ids"], [])
+        self.assertEqual(response["failure_details"], [])
+
+    def test_run_backtracking_schedule_reports_failure_details(self):
+        payload = {
+            "courses": (
+                course("C001", "T001", ("G001",), fixed_time_slot_id="UNKNOWN"),
+            ),
+            "timeSlots": (
+                time_slot("D1-S1", 1),
+            ),
+        }
+
+        response = run_backtracking_schedule(payload)
+
+        self.assertFalse(response["is_complete"])
+        self.assertEqual(response["failure_details"][0]["course_id"], "C001")
+        self.assertEqual(response["failure_details"][0]["reason"], "The fixed time slot is not included in the available time slots.")
+
+    def test_compare_schedule_algorithms_recommends_backtracking_when_greedy_gets_stuck(self):
+        payload = {
+            "courses": (
+                course("C001", "T001", ("G001",), candidate_time_slot_ids=("D1-S1", "D1-S2")),
+                course("C002", "T001", ("G002",), candidate_time_slot_ids=("D1-S1",)),
+                course("C003", "T003", ("G001",), candidate_time_slot_ids=("D1-S1", "D1-S2")),
+            ),
+            "time_slots": (
+                time_slot("D1-S1", 1),
+                time_slot("D1-S2", 2),
+            ),
+        }
+
+        response = compare_schedule_algorithms(payload)
+
+        self.assertEqual(response["recommended_algorithm"], "backtracking_search")
+        self.assertFalse(response["greedy"]["is_complete"])
+        self.assertTrue(response["backtracking"]["is_complete"])
 
     def test_evaluate_schedule_payload(self):
         payload = {
