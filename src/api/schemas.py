@@ -4,10 +4,10 @@ from __future__ import annotations
 
 from typing import Any, Mapping, Optional, Tuple
 
-from src.algorithms import GreedySchedulingOptions
 from src.assistant import ScheduleInsight, ScheduleSuggestion
 from src.evaluation import EvaluationIssue, ScheduleEvaluationResult
 from src.models import Campus, Course, Room, RoomType, ScheduleAssignment, TimeSlot
+from src.recommendation import CourseRecommendation, RecommendableCourse, StudentProfile
 
 
 def parse_courses(items: object) -> Tuple[Course, ...]:
@@ -34,6 +34,35 @@ def parse_assignments(items: object) -> Tuple[ScheduleAssignment, ...]:
     return tuple(_parse_assignment(_expect_mapping(item, "assignment")) for item in _expect_list(items, "assignments"))
 
 
+def parse_student_profile(item: object) -> StudentProfile:
+    """Parse a JSON-like student dictionary into a StudentProfile."""
+
+    data = _expect_mapping(item, "student")
+    return StudentProfile(
+        id=str(_required(data, "id")),
+        major=str(_required(data, "major")),
+        grade=str(_required(data, "grade")),
+        completed_course_ids=frozenset(
+            str(value)
+            for value in (
+                _optional_any(data, "completed_course_ids", "completedCourseIds")
+                or _optional_any(data, "completed_courses", "completedCourses")
+                or ()
+            )
+        ),
+        interests=frozenset(str(value) for value in (_optional_any(data, "interests", "interests") or ())),
+    )
+
+
+def parse_recommendable_courses(items: object) -> Tuple[RecommendableCourse, ...]:
+    """Parse JSON-like course dictionaries into recommendation course candidates."""
+
+    return tuple(
+        _parse_recommendable_course(_expect_mapping(item, "recommendable_course"))
+        for item in _expect_list(items, "courses")
+    )
+
+
 def serialize_assignments(assignments: Tuple[ScheduleAssignment, ...]) -> list[dict[str, Optional[str]]]:
     """Convert assignments to JSON-serializable dictionaries."""
 
@@ -56,7 +85,6 @@ def serialize_evaluation(result: ScheduleEvaluationResult) -> dict[str, object]:
         "issues": [_serialize_issue(issue) for issue in result.issues],
         "errors": [_serialize_issue(issue) for issue in result.errors],
         "warnings": [_serialize_issue(issue) for issue in result.warnings],
-        "metrics": dict(result.metrics),
     }
 
 
@@ -71,17 +99,24 @@ def serialize_insight(insight: ScheduleInsight) -> dict[str, object]:
     }
 
 
-def parse_greedy_options(value: object) -> GreedySchedulingOptions:
-    """Parse optional greedy scheduling strategy settings."""
+def serialize_course_recommendations(recommendations: Tuple[CourseRecommendation, ...]) -> list[dict[str, object]]:
+    """Convert student-course recommendations to JSON-serializable dictionaries."""
 
-    if value is None:
-        return GreedySchedulingOptions()
-    item = _expect_mapping(value, "options")
-    return GreedySchedulingOptions(
-        prioritize_fixed_time=_optional_bool(_optional_any(item, "prioritize_fixed_time", "prioritizeFixedTime"), True),
-        sort_by_conflict_degree=_optional_bool(_optional_any(item, "sort_by_conflict_degree", "sortByConflictDegree"), True),
-        sort_by_candidate_count=_optional_bool(_optional_any(item, "sort_by_candidate_count", "sortByCandidateCount"), False),
-    )
+    return [
+        {
+            "course_id": recommendation.course_id,
+            "course_name": recommendation.course_name,
+            "score": recommendation.score,
+            "has_time_conflict": recommendation.has_time_conflict,
+            "reasons": list(recommendation.reasons),
+            "time_slot_id": recommendation.time_slot_id,
+            "matched_interest_tags": list(recommendation.matched_interest_tags),
+            "missing_prerequisite_ids": list(recommendation.missing_prerequisite_ids),
+            "is_completed": recommendation.is_completed,
+            "is_currently_selected": recommendation.is_currently_selected,
+        }
+        for recommendation in recommendations
+    ]
 
 
 def _parse_course(item: Mapping[str, Any]) -> Course:
@@ -135,6 +170,27 @@ def _parse_assignment(item: Mapping[str, Any]) -> ScheduleAssignment:
         course_id=str(_required_any(item, "course_id", "courseId")),
         time_slot_id=str(_required_any(item, "time_slot_id", "timeSlotId")),
         room_id=_optional_str(_optional_any(item, "room_id", "roomId")),
+    )
+
+
+def _parse_recommendable_course(item: Mapping[str, Any]) -> RecommendableCourse:
+    return RecommendableCourse(
+        id=str(_required(item, "id")),
+        name=str(_required(item, "name")),
+        major_tags=tuple(str(value) for value in (_optional_any(item, "major_tags", "majorTags") or ())),
+        grade_tags=tuple(str(value) for value in (_optional_any(item, "grade_tags", "gradeTags") or ())),
+        interest_tags=tuple(str(value) for value in (_optional_any(item, "interest_tags", "interestTags") or ())),
+        time_slot_id=_optional_str(_optional_any(item, "time_slot_id", "timeSlotId")),
+        prerequisite_course_ids=tuple(
+            str(value)
+            for value in (
+                _optional_any(item, "prerequisite_course_ids", "prerequisiteCourseIds")
+                or _optional_any(item, "prerequisites", "prerequisites")
+                or ()
+            )
+        ),
+        category=_optional_str(item.get("category")),
+        credit=_optional_float(item.get("credit")),
     )
 
 
@@ -200,14 +256,10 @@ def _optional_str(value: object) -> Optional[str]:
     return str(value)
 
 
-def _optional_bool(value: object, default: bool) -> bool:
+def _optional_float(value: object) -> Optional[float]:
     if value in (None, ""):
-        return default
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, str):
-        return value.lower() in {"1", "true", "yes", "y"}
-    return bool(value)
+        return None
+    return float(value)
 
 
 def _expect_mapping(value: object, name: str) -> Mapping[str, Any]:

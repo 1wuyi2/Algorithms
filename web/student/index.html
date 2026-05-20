@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>南开大学学院排课系统 - 学生端推荐</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="hero">
+        <div>
+          <p class="eyebrow">Nankai University</p>
+          <h1>学生端个性化选课推荐</h1>
+          <p class="subtitle">根据专业、年级、已修课程、兴趣方向和当前课表，生成带推荐理由和冲突提示的课程列表。</p>
+        </div>
+        <div class="hero-card">
+          <span id="recommendationCount">0</span>
+          <small>推荐课程</small>
+        </div>
+      </header>
+
+      <main class="layout">
+        <section class="panel profile-panel">
+          <div class="panel-heading">
+            <h2>学生画像</h2>
+            <p>用于构建推荐分数，可替换为真实教务系统数据。</p>
+          </div>
+          <form id="studentForm" class="form-grid">
+            <label>
+              学号
+              <input name="id" required value="S001" />
+            </label>
+            <label>
+              专业
+              <input name="major" required value="Computer Science" />
+            </label>
+            <label>
+              年级
+              <input name="grade" required value="2023" />
+            </label>
+            <label>
+              已修课程编号，逗号分隔
+              <input name="completedCourseIds" value="C001" />
+            </label>
+            <label class="wide">
+              兴趣方向，逗号分隔
+              <input name="interests" value="algorithm, AI" />
+            </label>
+            <label>
+              推荐数量 Top K
+              <input name="topK" type="number" min="1" value="5" />
+            </label>
+            <label class="checkbox-row">
+              <input name="includeConflicted" type="checkbox" checked />
+              保留时间冲突课程并显示冲突原因
+            </label>
+            <button type="submit">生成推荐</button>
+          </form>
+        </section>
+
+        <section class="panel schedule-panel">
+          <div class="panel-heading">
+            <h2>当前个人课表</h2>
+            <p>推荐算法会据此判断时间冲突。</p>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>课程编号</th>
+                  <th>时间槽</th>
+                </tr>
+              </thead>
+              <tbody id="scheduleBody"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="panel data-panel">
+          <div class="panel-heading">
+            <h2>候选课程数据</h2>
+            <p>当前为前端测试样例，后续可由课程数据库或教务接口提供。</p>
+          </div>
+          <textarea id="coursesJson" spellcheck="false"></textarea>
+          <div class="actions">
+            <button id="resetSampleButton" type="button" class="secondary">恢复样例数据</button>
+            <button id="localPreviewButton" type="button" class="secondary">仅刷新当前课表</button>
+          </div>
+        </section>
+
+        <section class="panel results-panel">
+          <div class="panel-heading">
+            <h2>推荐结果</h2>
+            <p id="resultSummary">请点击“生成推荐”。</p>
+          </div>
+          <div id="recommendationList" class="recommendation-list">
+            <div class="empty-state">暂无推荐结果</div>
+          </div>
+        </section>
+      </main>
+    </div>
+    <script src="./app.js"></script>
+  </body>
+</html>
