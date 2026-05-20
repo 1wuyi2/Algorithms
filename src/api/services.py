@@ -42,6 +42,8 @@ def run_greedy_schedule(payload: Mapping[str, Any]) -> dict[str, object]:
             {
                 "course_id": item.course_id,
                 "reason": item.reason,
+                "candidate_time_slot_ids": list(item.candidate_time_slot_ids),
+                "blocking_course_ids": list(item.blocking_course_ids),
             }
             for item in result.unscheduled
         ],
@@ -62,6 +64,76 @@ def run_backtracking_schedule(payload: Mapping[str, Any]) -> dict[str, object]:
         "failed_course_ids": list(result.failed_course_ids),
         "reason": result.reason,
         "search_steps": result.search_steps,
+        "stopped_by_limit": result.stopped_by_limit,
+        "failure_details": [
+            {
+                "course_id": detail.course_id,
+                "reason": detail.reason,
+                "candidate_time_slot_ids": list(detail.candidate_time_slot_ids),
+                "feasible_time_slot_ids": list(detail.feasible_time_slot_ids),
+                "blocking_course_ids": list(detail.blocking_course_ids),
+            }
+            for detail in result.failure_details
+        ],
+    }
+
+
+def compare_schedule_algorithms(payload: Mapping[str, Any]) -> dict[str, object]:
+    """Run greedy and backtracking scheduling, then recommend one result."""
+
+    courses = parse_courses(payload.get("courses"))
+    time_slots = parse_time_slots(payload.get("time_slots") or payload.get("timeSlots"))
+    max_steps = int(payload.get("max_steps") or payload.get("maxSteps") or 100_000)
+
+    greedy_result = greedy_color_schedule(courses, time_slots)
+    backtracking_result = backtracking_schedule(courses, time_slots, conflict_graph=greedy_result.conflict_graph, max_steps=max_steps)
+    greedy_evaluation = evaluate_schedule(courses, greedy_result.assignments, conflict_graph=greedy_result.conflict_graph)
+    backtracking_evaluation = evaluate_schedule(courses, backtracking_result.assignments, conflict_graph=greedy_result.conflict_graph)
+    recommended_algorithm, recommendation_reason = _recommend_algorithm(
+        greedy_complete=greedy_result.is_complete,
+        greedy_score=greedy_evaluation.score,
+        backtracking_complete=backtracking_result.is_complete,
+        backtracking_score=backtracking_evaluation.score,
+    )
+
+    return {
+        "recommended_algorithm": recommended_algorithm,
+        "recommendation_reason": recommendation_reason,
+        "greedy": {
+            "is_complete": greedy_result.is_complete,
+            "score": greedy_evaluation.score,
+            "assignments": serialize_assignments(greedy_result.assignments),
+            "unscheduled": [
+                {
+                    "course_id": item.course_id,
+                    "reason": item.reason,
+                    "candidate_time_slot_ids": list(item.candidate_time_slot_ids),
+                    "blocking_course_ids": list(item.blocking_course_ids),
+                }
+                for item in greedy_result.unscheduled
+            ],
+            "issue_count": len(greedy_evaluation.issues),
+        },
+        "backtracking": {
+            "is_complete": backtracking_result.is_complete,
+            "score": backtracking_evaluation.score,
+            "assignments": serialize_assignments(backtracking_result.assignments),
+            "failed_course_ids": list(backtracking_result.failed_course_ids),
+            "reason": backtracking_result.reason,
+            "search_steps": backtracking_result.search_steps,
+            "stopped_by_limit": backtracking_result.stopped_by_limit,
+            "failure_details": [
+                {
+                    "course_id": detail.course_id,
+                    "reason": detail.reason,
+                    "candidate_time_slot_ids": list(detail.candidate_time_slot_ids),
+                    "feasible_time_slot_ids": list(detail.feasible_time_slot_ids),
+                    "blocking_course_ids": list(detail.blocking_course_ids),
+                }
+                for detail in backtracking_result.failure_details
+            ],
+            "issue_count": len(backtracking_evaluation.issues),
+        },
     }
 
 
@@ -89,3 +161,23 @@ def analyze_schedule_payload(payload: Mapping[str, Any]) -> dict[str, object]:
             rooms=rooms,
         )
     )
+
+
+def _recommend_algorithm(
+    *,
+    greedy_complete: bool,
+    greedy_score: int,
+    backtracking_complete: bool,
+    backtracking_score: int,
+) -> tuple[str, str]:
+    if backtracking_complete and not greedy_complete:
+        return "backtracking_search", "Backtracking found a complete schedule while greedy did not."
+    if greedy_complete and not backtracking_complete:
+        return "greedy_coloring", "Greedy found a complete schedule while backtracking did not."
+    if backtracking_score > greedy_score:
+        return "backtracking_search", "Backtracking produced a higher evaluation score."
+    if greedy_score > backtracking_score:
+        return "greedy_coloring", "Greedy produced a higher evaluation score."
+    if greedy_complete:
+        return "greedy_coloring", "Both algorithms are complete with the same score; greedy is recommended for speed."
+    return "backtracking_search", "Both algorithms are incomplete; backtracking provides stronger diagnostic information."

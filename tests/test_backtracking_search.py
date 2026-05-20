@@ -79,6 +79,23 @@ class BacktrackingScheduleTests(unittest.TestCase):
         self.assertFalse(result.is_complete)
         self.assertEqual(result.failed_course_ids, ("C001",))
         self.assertEqual(result.search_steps, 0)
+        self.assertEqual(result.failure_details[0].course_id, "C001")
+        self.assertEqual(result.failure_details[0].reason, "The fixed time slot is not included in the available time slots.")
+
+    def test_reports_failure_details_when_constraints_are_too_tight(self):
+        courses = (
+            course("C001", "T001", ("G001",)),
+            course("C002", "T001", ("G002",)),
+            course("C003", "T001", ("G003",)),
+        )
+        time_slots = (slot("D1-S1", 1), slot("D1-S2", 2))
+
+        result = backtracking_schedule(courses, time_slots)
+
+        self.assertFalse(result.is_complete)
+        self.assertTrue(result.failure_details)
+        self.assertEqual(result.failure_details[0].candidate_time_slot_ids, ("D1-S1", "D1-S2"))
+        self.assertTrue(result.failure_details[0].blocking_course_ids)
 
     def test_rejects_invalid_max_steps(self):
         courses = (course("C001", "T001", ("G001",)),)

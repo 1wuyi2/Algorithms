@@ -78,6 +78,19 @@ class GreedyColoringTests(unittest.TestCase):
         self.assertEqual(len(result.assignments), 2)
         self.assertEqual(len(result.unscheduled), 1)
         self.assertEqual(result.unscheduled[0].course_id, "C003")
+        self.assertEqual(result.unscheduled[0].candidate_time_slot_ids, ("D1-S1", "D1-S2"))
+        self.assertEqual(result.unscheduled[0].blocking_course_ids, ("C001", "C002"))
+
+    def test_reports_invalid_fixed_time_slot_reason(self):
+        courses = (
+            course("C001", "T001", ("G001",), fixed_time_slot_id="UNKNOWN"),
+        )
+        time_slots = (slot("D1-S1", 1),)
+
+        result = greedy_color_schedule(courses, time_slots)
+
+        self.assertFalse(result.is_complete)
+        self.assertEqual(result.unscheduled[0].reason, "The fixed time slot is not included in the available time slots.")
 
     def test_rejects_duplicate_time_slot_ids(self):
         courses = (course("C001", "T001", ("G001",)),)

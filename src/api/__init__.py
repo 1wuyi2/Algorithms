@@ -1,7 +1,9 @@
 """API helpers and service entry points."""
 
+from .errors import ApiError, error_payload
 from .services import (
     analyze_schedule_payload,
+    compare_schedule_algorithms,
     evaluate_schedule_payload,
     health_response,
     run_backtracking_schedule,
@@ -9,7 +11,10 @@ from .services import (
 )
 
 __all__ = [
+    "ApiError",
     "analyze_schedule_payload",
+    "compare_schedule_algorithms",
+    "error_payload",
     "evaluate_schedule_payload",
     "health_response",
     "run_backtracking_schedule",

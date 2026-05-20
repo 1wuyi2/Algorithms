@@ -130,6 +130,7 @@
 - `GET /health`：健康检查
 - `POST /schedule/greedy`：运行贪心图染色排课
 - `POST /schedule/backtracking`：运行回溯搜索排课
+- `POST /schedule/compare`：对比贪心图染色和回溯搜索结果
 - `POST /schedule/evaluate`：评价课表质量
 - `POST /assistant/analyze`：生成 AI 辅助排课分析和优化建议
 
@@ -245,6 +246,28 @@ GET http://127.0.0.1:8000/health
 - `src/api/`
 - `src/algorithms/`
 - `src/evaluation/`
+
+当前已推进：
+
+- API 错误响应已加入统一 `success`、`code`、`error` 字段
+- 保留原有 `error` 字段，避免影响已有简单前端调用
+- 贪心排课未排课程时会返回更详细原因
+- 未排课程结果会包含候选时间槽 `candidate_time_slot_ids`
+- 未排课程结果会包含阻塞课程 `blocking_course_ids`
+- 回溯搜索失败时会返回 `failure_details`
+- 回溯失败详情包含候选时间槽、当前可行时间槽和阻塞课程
+- 已新增 `POST /schedule/compare` 算法对比接口
+- 对比接口会同时返回贪心结果、回溯结果、评价分数和推荐算法
+- 已补充对应单元测试
+
+后续还可以完善：
+
+- 统一 API 成功响应格式，例如 `success`、`data`、`meta`
+- 增加接口文档和请求 / 响应示例
+- 增加教师每日负载、班级每日负载、早八和晚课数量等评价指标
+- 增加贪心算法排序策略参数，例如是否优先固定时间课程、是否按冲突度排序
+- 增强回溯搜索剪枝策略，减少搜索步数
+- 加入局部优化策略，用于改善已生成课表的质量
 
 ### 任务二：数据导入、数据库与持久化
 

@@ -20,6 +20,8 @@ class UnscheduledCourse:
 
     course_id: str
     reason: str
+    candidate_time_slot_ids: Tuple[str, ...] = ()
+    blocking_course_ids: Tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -84,17 +86,20 @@ def greedy_color_schedule(
             unscheduled.append(
                 UnscheduledCourse(
                     course_id=course.id,
-                    reason="No available time slot candidates for this course.",
+                    reason=_no_candidate_reason(course, time_slot_ids),
                 )
             )
             continue
 
         selected_time_slot_id = _first_feasible_time_slot(course.id, candidate_ids, graph, assigned)
         if selected_time_slot_id is None:
+            blocking_course_ids = _blocking_course_ids(course.id, candidate_ids, graph, assigned)
             unscheduled.append(
                 UnscheduledCourse(
                     course_id=course.id,
                     reason="All candidate time slots conflict with already scheduled neighboring courses.",
+                    candidate_time_slot_ids=candidate_ids,
+                    blocking_course_ids=blocking_course_ids,
                 )
             )
             continue
@@ -123,6 +128,16 @@ def _candidate_time_slot_ids(
     return time_slot_ids
 
 
+def _no_candidate_reason(course: Course, time_slot_ids: Tuple[str, ...]) -> str:
+    if not time_slot_ids:
+        return "No time slots were provided."
+    if course.fixed_time_slot_id is not None:
+        return "The fixed time slot is not included in the available time slots."
+    if course.candidate_time_slot_ids:
+        return "None of the course candidate time slots are included in the available time slots."
+    return "No available time slot candidates for this course."
+
+
 def _first_feasible_time_slot(
     course_id: str,
     candidate_ids: Tuple[str, ...],
@@ -134,6 +149,21 @@ def _first_feasible_time_slot(
         if all(assigned.get(neighbor_id) != time_slot_id for neighbor_id in neighbor_ids):
             return time_slot_id
     return None
+
+
+def _blocking_course_ids(
+    course_id: str,
+    candidate_ids: Tuple[str, ...],
+    graph: ConflictGraph,
+    assigned: Mapping[str, str],
+) -> Tuple[str, ...]:
+    blocking_ids = []
+    candidate_id_set = set(candidate_ids)
+    for neighbor_id in graph.neighbors(course_id):
+        assigned_time_slot_id = assigned.get(neighbor_id)
+        if assigned_time_slot_id in candidate_id_set:
+            blocking_ids.append(neighbor_id)
+    return tuple(sorted(blocking_ids))
 
 
 def _ensure_unique_ids(ids: Iterable[str], entity_name: str) -> None:
