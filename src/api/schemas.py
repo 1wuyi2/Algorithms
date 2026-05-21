@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Mapping, Optional, Tuple
 
+from src.algorithms import GreedySchedulingOptions
 from src.assistant import ScheduleInsight, ScheduleSuggestion
 from src.evaluation import EvaluationIssue, ScheduleEvaluationResult
 from src.models import Campus, Course, Room, RoomType, ScheduleAssignment, TimeSlot
@@ -63,6 +64,28 @@ def parse_recommendable_courses(items: object) -> Tuple[RecommendableCourse, ...
     )
 
 
+def parse_greedy_options(value: object) -> GreedySchedulingOptions:
+    """Parse optional greedy scheduling strategy settings."""
+
+    if value is None:
+        return GreedySchedulingOptions()
+    item = _expect_mapping(value, "options")
+    return GreedySchedulingOptions(
+        prioritize_fixed_time=_optional_bool(
+            _optional_any(item, "prioritize_fixed_time", "prioritizeFixedTime"),
+            True,
+        ),
+        sort_by_conflict_degree=_optional_bool(
+            _optional_any(item, "sort_by_conflict_degree", "sortByConflictDegree"),
+            True,
+        ),
+        sort_by_candidate_count=_optional_bool(
+            _optional_any(item, "sort_by_candidate_count", "sortByCandidateCount"),
+            False,
+        ),
+    )
+
+
 def serialize_assignments(assignments: Tuple[ScheduleAssignment, ...]) -> list[dict[str, Optional[str]]]:
     """Convert assignments to JSON-serializable dictionaries."""
 
@@ -85,6 +108,7 @@ def serialize_evaluation(result: ScheduleEvaluationResult) -> dict[str, object]:
         "issues": [_serialize_issue(issue) for issue in result.issues],
         "errors": [_serialize_issue(issue) for issue in result.errors],
         "warnings": [_serialize_issue(issue) for issue in result.warnings],
+        "metrics": dict(result.metrics),
     }
 
 
@@ -260,6 +284,20 @@ def _optional_float(value: object) -> Optional[float]:
     if value in (None, ""):
         return None
     return float(value)
+
+
+def _optional_bool(value: object, default: bool) -> bool:
+    if value in (None, ""):
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().casefold()
+        if normalized in {"true", "1", "yes", "y"}:
+            return True
+        if normalized in {"false", "0", "no", "n"}:
+            return False
+    return bool(value)
 
 
 def _expect_mapping(value: object, name: str) -> Mapping[str, Any]:
