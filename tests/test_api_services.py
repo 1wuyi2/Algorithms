@@ -38,6 +38,8 @@ class ApiServiceTests(unittest.TestCase):
     def test_health_response(self):
         response = health_response()
 
+        self.assertTrue(response["success"])
+        self.assertEqual(response["data"]["status"], "ok")
         self.assertEqual(response["status"], "ok")
 
     def test_error_payload_keeps_simple_error_field(self):
@@ -61,9 +63,33 @@ class ApiServiceTests(unittest.TestCase):
 
         response = run_greedy_schedule(payload)
 
+        self.assertTrue(response["success"])
+        self.assertEqual(response["data"]["algorithm"], "greedy_coloring")
         self.assertEqual(response["algorithm"], "greedy_coloring")
         self.assertTrue(response["is_complete"])
         self.assertEqual(len(response["assignments"]), 2)
+
+    def test_run_greedy_schedule_accepts_strategy_options(self):
+        payload = {
+            "courses": (
+                course("C001", "T001", ("G001",)),
+                course("C100", "T001", ("G002",), fixed_time_slot_id="D1-S1"),
+            ),
+            "time_slots": (
+                time_slot("D1-S1", 1),
+                time_slot("D1-S2", 2),
+            ),
+            "options": {
+                "prioritize_fixed_time": False,
+                "sort_by_conflict_degree": False,
+            },
+        }
+
+        response = run_greedy_schedule(payload)
+
+        self.assertFalse(response["is_complete"])
+        self.assertFalse(response["options"]["prioritize_fixed_time"])
+        self.assertEqual(response["unscheduled"][0]["course_id"], "C100")
 
     def test_run_greedy_schedule_reports_unscheduled_diagnostics(self):
         payload = {
@@ -99,6 +125,7 @@ class ApiServiceTests(unittest.TestCase):
 
         response = run_backtracking_schedule(payload)
 
+        self.assertTrue(response["success"])
         self.assertEqual(response["algorithm"], "backtracking_search")
         self.assertTrue(response["is_complete"])
         self.assertEqual(response["failed_course_ids"], [])
@@ -135,9 +162,11 @@ class ApiServiceTests(unittest.TestCase):
 
         response = compare_schedule_algorithms(payload)
 
+        self.assertTrue(response["success"])
         self.assertEqual(response["recommended_algorithm"], "backtracking_search")
         self.assertFalse(response["greedy"]["is_complete"])
         self.assertTrue(response["backtracking"]["is_complete"])
+        self.assertIn("metrics", response["greedy"])
 
     def test_evaluate_schedule_payload(self):
         payload = {
@@ -149,13 +178,18 @@ class ApiServiceTests(unittest.TestCase):
                 {"course_id": "C001", "time_slot_id": "D1-S1"},
                 {"course_id": "C002", "time_slot_id": "D1-S1"},
             ),
+            "time_slots": (
+                time_slot("D1-S1", 1),
+            ),
         }
 
         response = evaluate_schedule_payload(payload)
 
+        self.assertTrue(response["success"])
         self.assertFalse(response["is_feasible"])
         self.assertLess(response["score"], 100)
         self.assertTrue(response["errors"])
+        self.assertIn("teacher_daily_load", response["metrics"])
 
     def test_analyze_schedule_payload(self):
         payload = {
@@ -171,6 +205,7 @@ class ApiServiceTests(unittest.TestCase):
 
         response = analyze_schedule_payload(payload)
 
+        self.assertTrue(response["success"])
         self.assertIn(response["risk_level"], {"low", "medium", "high"})
         self.assertIn("metrics", response)
         self.assertTrue(response["suggestions"])

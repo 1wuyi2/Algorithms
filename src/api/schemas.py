@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Mapping, Optional, Tuple
 
+from src.algorithms import GreedySchedulingOptions
 from src.assistant import ScheduleInsight, ScheduleSuggestion
 from src.evaluation import EvaluationIssue, ScheduleEvaluationResult
 from src.models import Campus, Course, Room, RoomType, ScheduleAssignment, TimeSlot
@@ -55,6 +56,7 @@ def serialize_evaluation(result: ScheduleEvaluationResult) -> dict[str, object]:
         "issues": [_serialize_issue(issue) for issue in result.issues],
         "errors": [_serialize_issue(issue) for issue in result.errors],
         "warnings": [_serialize_issue(issue) for issue in result.warnings],
+        "metrics": dict(result.metrics),
     }
 
 
@@ -67,6 +69,19 @@ def serialize_insight(insight: ScheduleInsight) -> dict[str, object]:
         "metrics": dict(insight.metrics),
         "suggestions": [_serialize_suggestion(suggestion) for suggestion in insight.suggestions],
     }
+
+
+def parse_greedy_options(value: object) -> GreedySchedulingOptions:
+    """Parse optional greedy scheduling strategy settings."""
+
+    if value is None:
+        return GreedySchedulingOptions()
+    item = _expect_mapping(value, "options")
+    return GreedySchedulingOptions(
+        prioritize_fixed_time=_optional_bool(_optional_any(item, "prioritize_fixed_time", "prioritizeFixedTime"), True),
+        sort_by_conflict_degree=_optional_bool(_optional_any(item, "sort_by_conflict_degree", "sortByConflictDegree"), True),
+        sort_by_candidate_count=_optional_bool(_optional_any(item, "sort_by_candidate_count", "sortByCandidateCount"), False),
+    )
 
 
 def _parse_course(item: Mapping[str, Any]) -> Course:
@@ -183,6 +198,16 @@ def _optional_str(value: object) -> Optional[str]:
     if value in (None, ""):
         return None
     return str(value)
+
+
+def _optional_bool(value: object, default: bool) -> bool:
+    if value in (None, ""):
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.lower() in {"1", "true", "yes", "y"}
+    return bool(value)
 
 
 def _expect_mapping(value: object, name: str) -> Mapping[str, Any]:
