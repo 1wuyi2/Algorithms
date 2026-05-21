@@ -3,7 +3,7 @@
 import unittest
 
 from src.evaluation import EvaluationIssueType, evaluate_schedule
-from src.models import Campus, Course, Room, RoomType, ScheduleAssignment
+from src.models import Campus, Course, Room, RoomType, ScheduleAssignment, TimeSlot
 
 
 def course(course_id, teacher_id, class_group_ids, **kwargs):
@@ -15,6 +15,10 @@ def course(course_id, teacher_id, class_group_ids, **kwargs):
         weekly_hours=2,
         **kwargs,
     )
+
+
+def slot(slot_id, weekday, section):
+    return TimeSlot(id=slot_id, weekday=weekday, start_section=section, end_section=section)
 
 
 class ScheduleEvaluatorTests(unittest.TestCase):
@@ -33,6 +37,7 @@ class ScheduleEvaluatorTests(unittest.TestCase):
         self.assertTrue(result.is_feasible)
         self.assertEqual(result.score, 100)
         self.assertEqual(result.issues, ())
+        self.assertEqual(result.metrics["assigned_course_count"], 2)
 
     def test_detects_course_time_conflict_and_missing_assignment(self):
         courses = (
@@ -99,6 +104,29 @@ class ScheduleEvaluatorTests(unittest.TestCase):
         self.assertFalse(result.is_feasible)
         self.assertIn(EvaluationIssueType.UNKNOWN_COURSE, issue_types)
         self.assertIn(EvaluationIssueType.UNKNOWN_ROOM, issue_types)
+
+    def test_reports_daily_load_and_early_evening_metrics(self):
+        courses = (
+            course("C001", "T001", ("G001",)),
+            course("C002", "T001", ("G001",)),
+        )
+        assignments = (
+            ScheduleAssignment(course_id="C001", time_slot_id="D1-S1"),
+            ScheduleAssignment(course_id="C002", time_slot_id="D1-S12"),
+        )
+        time_slots = (
+            slot("D1-S1", 1, 1),
+            slot("D1-S12", 1, 12),
+        )
+
+        result = evaluate_schedule(courses, assignments, time_slots=time_slots)
+
+        self.assertEqual(result.metrics["teacher_daily_load"]["T001"]["1"], 2)
+        self.assertEqual(result.metrics["class_group_daily_load"]["G001"]["1"], 2)
+        self.assertEqual(result.metrics["max_teacher_daily_load"], 2)
+        self.assertEqual(result.metrics["max_class_group_daily_load"], 2)
+        self.assertEqual(result.metrics["early_section_count"], 1)
+        self.assertEqual(result.metrics["evening_section_count"], 1)
 
 
 if __name__ == "__main__":

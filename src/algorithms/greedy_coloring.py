@@ -15,6 +15,15 @@ from src.models import Course, ScheduleAssignment, TimeSlot
 
 
 @dataclass(frozen=True)
+class GreedySchedulingOptions:
+    """Configurable ordering strategy for greedy scheduling."""
+
+    prioritize_fixed_time: bool = True
+    sort_by_conflict_degree: bool = True
+    sort_by_candidate_count: bool = False
+
+
+@dataclass(frozen=True)
 class UnscheduledCourse:
     """A course that could not be assigned by the greedy scheduler."""
 
@@ -49,13 +58,13 @@ def greedy_color_schedule(
     time_slots: Iterable[TimeSlot],
     *,
     conflict_graph: Optional[ConflictGraph] = None,
+    options: Optional[GreedySchedulingOptions] = None,
 ) -> GreedyScheduleResult:
     """Assign courses to time slots using a greedy graph-coloring strategy.
 
-    Fixed-time courses are processed first, then remaining courses are ordered
-    by descending graph degree. A course uses its fixed time slot if present;
-    otherwise it uses candidate_time_slot_ids when provided, or all given time
-    slots when no candidate list is specified.
+    By default, fixed-time courses are processed first, then remaining courses
+    are ordered by descending graph degree. These ordering rules can be changed
+    through GreedySchedulingOptions for comparison experiments.
     """
 
     course_list = tuple(courses)
@@ -67,21 +76,24 @@ def greedy_color_schedule(
     time_slot_id_set = set(time_slot_ids)
     graph = conflict_graph or build_conflict_graph(course_list)
     _ensure_graph_covers_courses(graph, course_list)
+    scheduling_options = options or GreedySchedulingOptions()
 
     assigned: Dict[str, str] = {}
     unscheduled = []
 
-    ordered_courses = sorted(
+    candidates_by_course_id = {
+        course.id: _candidate_time_slot_ids(course, time_slot_ids, time_slot_id_set)
+        for course in course_list
+    }
+    ordered_courses = _order_courses(
         course_list,
-        key=lambda course: (
-            0 if course.fixed_time_slot_id else 1,
-            -graph.degree(course.id),
-            course.id,
-        ),
+        graph,
+        candidates_by_course_id,
+        scheduling_options,
     )
 
     for course in ordered_courses:
-        candidate_ids = _candidate_time_slot_ids(course, time_slot_ids, time_slot_id_set)
+        candidate_ids = candidates_by_course_id[course.id]
         if not candidate_ids:
             unscheduled.append(
                 UnscheduledCourse(
@@ -112,6 +124,24 @@ def greedy_color_schedule(
         if course.id in assigned
     )
     return GreedyScheduleResult(assignments=assignments, unscheduled=tuple(unscheduled), conflict_graph=graph)
+
+
+def _order_courses(
+    courses: Tuple[Course, ...],
+    graph: ConflictGraph,
+    candidates_by_course_id: Mapping[str, Tuple[str, ...]],
+    options: GreedySchedulingOptions,
+) -> Tuple[Course, ...]:
+    def sort_key(course: Course) -> Tuple[int, int, int, str]:
+        fixed_priority = 0
+        if options.prioritize_fixed_time:
+            fixed_priority = 0 if course.fixed_time_slot_id else 1
+
+        degree_priority = -graph.degree(course.id) if options.sort_by_conflict_degree else 0
+        candidate_priority = len(candidates_by_course_id[course.id]) if options.sort_by_candidate_count else 0
+        return fixed_priority, degree_priority, candidate_priority, course.id
+
+    return tuple(sorted(courses, key=sort_key))
 
 
 def _candidate_time_slot_ids(

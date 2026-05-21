@@ -2,7 +2,7 @@
 
 import unittest
 
-from src.algorithms import greedy_color_schedule
+from src.algorithms import GreedySchedulingOptions, greedy_color_schedule
 from src.models import Course, TimeSlot
 
 
@@ -50,6 +50,27 @@ class GreedyColoringTests(unittest.TestCase):
         self.assertTrue(result.is_complete)
         self.assertEqual(assignments["C001"], "D1-S1")
         self.assertEqual(assignments["C002"], "D1-S2")
+
+    def test_can_disable_fixed_time_priority_for_strategy_comparison(self):
+        courses = (
+            course("C001", "T001", ("G001",)),
+            course("C100", "T001", ("G002",), fixed_time_slot_id="D1-S1"),
+        )
+        time_slots = (slot("D1-S1", 1), slot("D1-S2", 2))
+
+        default_result = greedy_color_schedule(courses, time_slots)
+        custom_result = greedy_color_schedule(
+            courses,
+            time_slots,
+            options=GreedySchedulingOptions(
+                prioritize_fixed_time=False,
+                sort_by_conflict_degree=False,
+            ),
+        )
+
+        self.assertTrue(default_result.is_complete)
+        self.assertFalse(custom_result.is_complete)
+        self.assertEqual(custom_result.unscheduled[0].course_id, "C100")
 
     def test_respects_candidate_time_slots(self):
         courses = (

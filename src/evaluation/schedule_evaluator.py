@@ -7,12 +7,16 @@ optional room checks only run when room objects are provided.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from typing import Dict, Iterable, Mapping, Optional, Tuple
 
 from src.graph import ConflictGraph, build_conflict_graph
-from src.models import Course, Room, ScheduleAssignment
+from src.models import Course, Room, ScheduleAssignment, TimeSlot
+
+
+EARLY_SECTION_LIMIT = 2
+EVENING_SECTION_START = 11
 
 
 class EvaluationSeverity(str, Enum):
@@ -53,6 +57,7 @@ class ScheduleEvaluationResult:
 
     score: int
     issues: Tuple[EvaluationIssue, ...]
+    metrics: Mapping[str, object] = field(default_factory=dict)
 
     @property
     def is_feasible(self) -> bool:
@@ -79,6 +84,7 @@ def evaluate_schedule(
     *,
     conflict_graph: Optional[ConflictGraph] = None,
     rooms: Iterable[Room] = (),
+    time_slots: Iterable[TimeSlot] = (),
 ) -> ScheduleEvaluationResult:
     """Evaluate a generated schedule.
 
@@ -90,6 +96,7 @@ def evaluate_schedule(
     course_list = tuple(courses)
     assignment_list = tuple(assignments)
     room_list = tuple(rooms)
+    time_slot_list = tuple(time_slots)
 
     course_by_id = {course.id: course for course in course_list}
     if len(course_by_id) != len(course_list):
@@ -98,6 +105,10 @@ def evaluate_schedule(
     room_by_id = {room.id: room for room in room_list}
     if len(room_by_id) != len(room_list):
         raise ValueError("Room ids must be unique for schedule evaluation")
+
+    time_slot_by_id = {slot.id: slot for slot in time_slot_list}
+    if len(time_slot_by_id) != len(time_slot_list):
+        raise ValueError("TimeSlot ids must be unique for schedule evaluation")
 
     graph = conflict_graph or build_conflict_graph(course_list)
     _ensure_graph_covers_courses(graph, course_list)
@@ -135,7 +146,8 @@ def evaluate_schedule(
     issues.extend(_find_room_issues(course_by_id, assignment_list, room_by_id))
 
     score = _score_issues(issues)
-    return ScheduleEvaluationResult(score=score, issues=tuple(issues))
+    metrics = _build_metrics(course_list, assignment_by_course_id, time_slot_by_id)
+    return ScheduleEvaluationResult(score=score, issues=tuple(issues), metrics=metrics)
 
 
 def _find_missing_assignments(
@@ -248,6 +260,63 @@ def _find_room_issues(
             )
 
     return tuple(issues)
+
+
+def _build_metrics(
+    courses: Tuple[Course, ...],
+    assignment_by_course_id: Mapping[str, ScheduleAssignment],
+    time_slot_by_id: Mapping[str, TimeSlot],
+) -> Mapping[str, object]:
+    teacher_daily_load: Dict[str, Dict[str, int]] = {}
+    class_group_daily_load: Dict[str, Dict[str, int]] = {}
+    early_section_count = 0
+    evening_section_count = 0
+    assignments_with_known_time_slots = 0
+
+    for course in courses:
+        assignment = assignment_by_course_id.get(course.id)
+        if assignment is None:
+            continue
+
+        slot = time_slot_by_id.get(assignment.time_slot_id)
+        if slot is None:
+            continue
+
+        assignments_with_known_time_slots += 1
+        weekday = str(slot.weekday)
+        _increase_daily_load(teacher_daily_load, course.teacher_id, weekday)
+        for class_group_id in course.class_group_ids:
+            _increase_daily_load(class_group_daily_load, class_group_id, weekday)
+
+        if slot.start_section <= EARLY_SECTION_LIMIT:
+            early_section_count += 1
+        if slot.start_section >= EVENING_SECTION_START:
+            evening_section_count += 1
+
+    return {
+        "assigned_course_count": len(assignment_by_course_id),
+        "missing_assignment_count": max(len(courses) - len(assignment_by_course_id), 0),
+        "assignments_with_known_time_slots": assignments_with_known_time_slots,
+        "teacher_daily_load": teacher_daily_load,
+        "class_group_daily_load": class_group_daily_load,
+        "max_teacher_daily_load": _max_daily_load(teacher_daily_load),
+        "max_class_group_daily_load": _max_daily_load(class_group_daily_load),
+        "early_section_count": early_section_count,
+        "evening_section_count": evening_section_count,
+    }
+
+
+def _increase_daily_load(load_map: Dict[str, Dict[str, int]], entity_id: str, weekday: str) -> None:
+    daily_load = load_map.setdefault(entity_id, {})
+    daily_load[weekday] = daily_load.get(weekday, 0) + 1
+
+
+def _max_daily_load(load_map: Mapping[str, Mapping[str, int]]) -> int:
+    max_load = 0
+    for daily_load in load_map.values():
+        if daily_load:
+            max_load = max(max_load, max(daily_load.values()))
+    return max_load
 
 
 def _score_issues(issues: Iterable[EvaluationIssue]) -> int:
