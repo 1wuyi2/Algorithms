@@ -17,6 +17,7 @@ from .services import (
     compare_schedule_algorithms,
     evaluate_schedule_payload,
     health_response,
+    recommend_courses_payload,
     run_backtracking_schedule,
     run_greedy_schedule,
 )
@@ -31,6 +32,7 @@ POST_ROUTES: dict[str, JsonHandler] = {
     "/schedule/compare": compare_schedule_algorithms,
     "/schedule/evaluate": evaluate_schedule_payload,
     "/assistant/analyze": analyze_schedule_payload,
+    "/student/recommend": recommend_courses_payload,
 }
 
 

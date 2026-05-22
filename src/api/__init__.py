@@ -7,6 +7,7 @@ from .services import (
     compare_schedule_algorithms,
     evaluate_schedule_payload,
     health_response,
+    recommend_courses_payload,
     run_backtracking_schedule,
     run_greedy_schedule,
 )
@@ -18,6 +19,7 @@ __all__ = [
     "error_payload",
     "evaluate_schedule_payload",
     "health_response",
+    "recommend_courses_payload",
     "run_backtracking_schedule",
     "run_greedy_schedule",
     "success_payload",

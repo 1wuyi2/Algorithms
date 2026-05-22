@@ -7,16 +7,18 @@ from typing import Any, Mapping
 from src.algorithms import backtracking_schedule, greedy_color_schedule
 from src.assistant import analyze_schedule
 from src.evaluation import evaluate_schedule
+from src.recommendation import recommend_courses
 
-from .responses import success_payload
 from .schemas import (
     parse_assignments,
     parse_courses,
-    parse_greedy_options,
+    parse_recommendable_courses,
     parse_rooms,
+    parse_student_profile,
     parse_time_slots,
     serialize_assignments,
     serialize_evaluation,
+    serialize_course_recommendations,
     serialize_insight,
 )
 
@@ -24,11 +26,10 @@ from .schemas import (
 def health_response() -> dict[str, object]:
     """Return a lightweight service health response."""
 
-    data = {
+    return {
         "status": "ok",
         "service": "nankai-scheduling-api",
     }
-    return success_payload(data)
 
 
 def run_greedy_schedule(payload: Mapping[str, Any]) -> dict[str, object]:
@@ -36,16 +37,10 @@ def run_greedy_schedule(payload: Mapping[str, Any]) -> dict[str, object]:
 
     courses = parse_courses(payload.get("courses"))
     time_slots = parse_time_slots(payload.get("time_slots") or payload.get("timeSlots"))
-    options = parse_greedy_options(payload.get("options"))
-    result = greedy_color_schedule(courses, time_slots, options=options)
-    data = {
+    result = greedy_color_schedule(courses, time_slots)
+    return {
         "algorithm": "greedy_coloring",
         "is_complete": result.is_complete,
-        "options": {
-            "prioritize_fixed_time": options.prioritize_fixed_time,
-            "sort_by_conflict_degree": options.sort_by_conflict_degree,
-            "sort_by_candidate_count": options.sort_by_candidate_count,
-        },
         "assignments": serialize_assignments(result.assignments),
         "unscheduled": [
             {
@@ -57,7 +52,6 @@ def run_greedy_schedule(payload: Mapping[str, Any]) -> dict[str, object]:
             for item in result.unscheduled
         ],
     }
-    return success_payload(data)
 
 
 def run_backtracking_schedule(payload: Mapping[str, Any]) -> dict[str, object]:
@@ -67,7 +61,7 @@ def run_backtracking_schedule(payload: Mapping[str, Any]) -> dict[str, object]:
     time_slots = parse_time_slots(payload.get("time_slots") or payload.get("timeSlots"))
     max_steps = int(payload.get("max_steps") or payload.get("maxSteps") or 100_000)
     result = backtracking_schedule(courses, time_slots, max_steps=max_steps)
-    data = {
+    return {
         "algorithm": "backtracking_search",
         "is_complete": result.is_complete,
         "assignments": serialize_assignments(result.assignments),
@@ -87,7 +81,6 @@ def run_backtracking_schedule(payload: Mapping[str, Any]) -> dict[str, object]:
             for detail in result.failure_details
         ],
     }
-    return success_payload(data)
 
 
 def compare_schedule_algorithms(payload: Mapping[str, Any]) -> dict[str, object]:
@@ -96,22 +89,11 @@ def compare_schedule_algorithms(payload: Mapping[str, Any]) -> dict[str, object]
     courses = parse_courses(payload.get("courses"))
     time_slots = parse_time_slots(payload.get("time_slots") or payload.get("timeSlots"))
     max_steps = int(payload.get("max_steps") or payload.get("maxSteps") or 100_000)
-    options = parse_greedy_options(payload.get("options"))
 
-    greedy_result = greedy_color_schedule(courses, time_slots, options=options)
+    greedy_result = greedy_color_schedule(courses, time_slots)
     backtracking_result = backtracking_schedule(courses, time_slots, conflict_graph=greedy_result.conflict_graph, max_steps=max_steps)
-    greedy_evaluation = evaluate_schedule(
-        courses,
-        greedy_result.assignments,
-        conflict_graph=greedy_result.conflict_graph,
-        time_slots=time_slots,
-    )
-    backtracking_evaluation = evaluate_schedule(
-        courses,
-        backtracking_result.assignments,
-        conflict_graph=greedy_result.conflict_graph,
-        time_slots=time_slots,
-    )
+    greedy_evaluation = evaluate_schedule(courses, greedy_result.assignments, conflict_graph=greedy_result.conflict_graph)
+    backtracking_evaluation = evaluate_schedule(courses, backtracking_result.assignments, conflict_graph=greedy_result.conflict_graph)
     recommended_algorithm, recommendation_reason = _recommend_algorithm(
         greedy_complete=greedy_result.is_complete,
         greedy_score=greedy_evaluation.score,
@@ -119,7 +101,7 @@ def compare_schedule_algorithms(payload: Mapping[str, Any]) -> dict[str, object]
         backtracking_score=backtracking_evaluation.score,
     )
 
-    data = {
+    return {
         "recommended_algorithm": recommended_algorithm,
         "recommendation_reason": recommendation_reason,
         "greedy": {
@@ -136,7 +118,6 @@ def compare_schedule_algorithms(payload: Mapping[str, Any]) -> dict[str, object]
                 for item in greedy_result.unscheduled
             ],
             "issue_count": len(greedy_evaluation.issues),
-            "metrics": dict(greedy_evaluation.metrics),
         },
         "backtracking": {
             "is_complete": backtracking_result.is_complete,
@@ -158,10 +139,8 @@ def compare_schedule_algorithms(payload: Mapping[str, Any]) -> dict[str, object]
                 for detail in backtracking_result.failure_details
             ],
             "issue_count": len(backtracking_evaluation.issues),
-            "metrics": dict(backtracking_evaluation.metrics),
         },
     }
-    return success_payload(data)
 
 
 def evaluate_schedule_payload(payload: Mapping[str, Any]) -> dict[str, object]:
@@ -170,8 +149,7 @@ def evaluate_schedule_payload(payload: Mapping[str, Any]) -> dict[str, object]:
     courses = parse_courses(payload.get("courses"))
     assignments = parse_assignments(payload.get("assignments"))
     rooms = parse_rooms(payload.get("rooms"))
-    time_slots = parse_time_slots(payload.get("time_slots") or payload.get("timeSlots"))
-    return success_payload(serialize_evaluation(evaluate_schedule(courses, assignments, rooms=rooms, time_slots=time_slots)))
+    return serialize_evaluation(evaluate_schedule(courses, assignments, rooms=rooms))
 
 
 def analyze_schedule_payload(payload: Mapping[str, Any]) -> dict[str, object]:
@@ -181,14 +159,53 @@ def analyze_schedule_payload(payload: Mapping[str, Any]) -> dict[str, object]:
     time_slots = parse_time_slots(payload.get("time_slots") or payload.get("timeSlots"))
     assignments = parse_assignments(payload.get("assignments"))
     rooms = parse_rooms(payload.get("rooms"))
-    return success_payload(serialize_insight(
+    return serialize_insight(
         analyze_schedule(
             courses,
             time_slots,
             assignments=assignments,
             rooms=rooms,
         )
-    ))
+    )
+
+
+def recommend_courses_payload(payload: Mapping[str, Any]) -> dict[str, object]:
+    """Generate student-side personalized course recommendations."""
+
+    student = parse_student_profile(payload.get("student"))
+    courses = parse_recommendable_courses(
+        payload.get("courses")
+        or payload.get("candidate_courses")
+        or payload.get("candidateCourses")
+    )
+    current_assignments = parse_assignments(
+        payload.get("current_assignments")
+        or payload.get("currentAssignments")
+        or payload.get("current_schedule")
+        or payload.get("currentSchedule")
+        or ()
+    )
+    top_k = int(payload.get("top_k") or payload.get("topK") or 5)
+    include_conflicted = _optional_bool(
+        payload.get("include_conflicted")
+        if "include_conflicted" in payload
+        else payload.get("includeConflicted"),
+        default=True,
+    )
+
+    recommendations = recommend_courses(
+        student,
+        courses,
+        current_assignments,
+        top_k=top_k,
+        include_conflicted=include_conflicted,
+    )
+    return {
+        "student_id": student.id,
+        "candidate_count": len(courses),
+        "top_k": top_k,
+        "recommendations": serialize_course_recommendations(recommendations),
+    }
 
 
 def _recommend_algorithm(
@@ -209,3 +226,17 @@ def _recommend_algorithm(
     if greedy_complete:
         return "greedy_coloring", "Both algorithms are complete with the same score; greedy is recommended for speed."
     return "backtracking_search", "Both algorithms are incomplete; backtracking provides stronger diagnostic information."
+
+
+def _optional_bool(value: object, *, default: bool) -> bool:
+    if value in (None, ""):
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().casefold()
+        if normalized in {"true", "1", "yes", "y"}:
+            return True
+        if normalized in {"false", "0", "no", "n"}:
+            return False
+    raise ValueError("Expected a boolean value")
