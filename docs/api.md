@@ -150,7 +150,7 @@ http://127.0.0.1:8000
 }
 ```
 
-响应中的 `failure_details` 会给出失败课程、候选时间槽、当前可行时间槽和阻塞课程。
+当前回溯算法使用动态可行域、MRV 课程选择、最少约束时间槽优先和前向检查剪枝。响应中的 `failure_details` 会给出失败课程、候选时间槽、当前可行时间槽和阻塞课程，`pruned_branches` 会记录本次搜索剪掉的分支数量。
 
 ## POST /schedule/compare
 
@@ -172,6 +172,7 @@ http://127.0.0.1:8000
   "backtracking": {
     "is_complete": true,
     "score": 100,
+    "pruned_branches": 0,
     "metrics": {}
   }
 }

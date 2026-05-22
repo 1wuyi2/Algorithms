@@ -74,6 +74,7 @@ def run_backtracking_schedule(payload: Mapping[str, Any]) -> dict[str, object]:
         "failed_course_ids": list(result.failed_course_ids),
         "reason": result.reason,
         "search_steps": result.search_steps,
+        "pruned_branches": result.pruned_branches,
         "stopped_by_limit": result.stopped_by_limit,
         "failure_details": [
             {
@@ -144,6 +145,7 @@ def compare_schedule_algorithms(payload: Mapping[str, Any]) -> dict[str, object]
             "failed_course_ids": list(backtracking_result.failed_course_ids),
             "reason": backtracking_result.reason,
             "search_steps": backtracking_result.search_steps,
+            "pruned_branches": backtracking_result.pruned_branches,
             "stopped_by_limit": backtracking_result.stopped_by_limit,
             "failure_details": [
                 {
