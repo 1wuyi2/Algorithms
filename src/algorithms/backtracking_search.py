@@ -37,6 +37,7 @@ class BacktrackingScheduleResult:
     search_steps: int
     failure_details: Tuple[BacktrackingFailureDetail, ...] = ()
     stopped_by_limit: bool = False
+    pruned_branches: int = 0
 
     @property
     def is_complete(self) -> bool:
@@ -59,8 +60,10 @@ def backtracking_schedule(
 ) -> BacktrackingScheduleResult:
     """Assign courses to time slots using recursive constraint search.
 
-    The search uses a minimum-remaining-values heuristic: at each step it picks
-    the unscheduled course with the fewest currently feasible time slots.
+    The search keeps dynamic time-slot domains, uses a
+    minimum-remaining-values heuristic to select the next course, tries the
+    least-constraining time slots first, and prunes branches with forward
+    checking before deeper recursion.
     """
 
     if max_steps <= 0:
@@ -102,13 +105,29 @@ def backtracking_schedule(
             ),
         )
 
+    singleton_conflicts = _find_singleton_domain_conflicts(candidates_by_course_id, graph)
+    if singleton_conflicts:
+        return BacktrackingScheduleResult(
+            assignments=(),
+            failed_course_ids=tuple(detail.course_id for detail in singleton_conflicts),
+            reason="Conflicting courses have the same only available time slot.",
+            conflict_graph=graph,
+            search_steps=0,
+            failure_details=singleton_conflicts,
+            pruned_branches=1,
+        )
+
     assigned: Dict[str, str] = {}
     dead_end_details: list[BacktrackingFailureDetail] = []
     steps = 0
     stopped_by_limit = False
+    pruned_branches = 0
 
-    def search(unassigned_ids: Tuple[str, ...]) -> bool:
-        nonlocal steps, stopped_by_limit
+    def search(
+        unassigned_ids: Tuple[str, ...],
+        domains: Mapping[str, Tuple[str, ...]],
+    ) -> bool:
+        nonlocal steps, stopped_by_limit, pruned_branches
 
         if not unassigned_ids:
             return True
@@ -116,7 +135,7 @@ def backtracking_schedule(
             stopped_by_limit = True
             return False
 
-        course_id, feasible_ids = _select_next_course(unassigned_ids, candidates_by_course_id, graph, assigned)
+        course_id, feasible_ids = _select_next_course(unassigned_ids, domains, graph)
         if not feasible_ids:
             dead_end_details.append(
                 _build_failure_detail(
@@ -131,18 +150,31 @@ def backtracking_schedule(
             return False
 
         remaining_ids = tuple(candidate_id for candidate_id in unassigned_ids if candidate_id != course_id)
-        for time_slot_id in feasible_ids:
+        ordered_time_slot_ids = _order_time_slots(course_id, feasible_ids, remaining_ids, domains, graph)
+        for time_slot_id in ordered_time_slot_ids:
             steps += 1
             assigned[course_id] = time_slot_id
-            if search(remaining_ids):
+            remaining_domains, failure_detail = _forward_check_domains(
+                course_id,
+                time_slot_id,
+                remaining_ids,
+                domains,
+                candidates_by_course_id,
+                graph,
+                assigned,
+            )
+            if failure_detail is None and search(remaining_ids, remaining_domains):
                 return True
+            if failure_detail is not None:
+                dead_end_details.append(failure_detail)
+                pruned_branches += 1
             assigned.pop(course_id, None)
             if stopped_by_limit:
                 return False
         return False
 
     all_course_ids = tuple(course.id for course in course_list)
-    solved = search(all_course_ids)
+    solved = search(all_course_ids, candidates_by_course_id)
 
     if solved:
         assignments = tuple(
@@ -155,6 +187,7 @@ def backtracking_schedule(
             reason=None,
             conflict_graph=graph,
             search_steps=steps,
+            pruned_branches=pruned_branches,
         )
 
     unsolved_ids = tuple(course_id for course_id in all_course_ids if course_id not in assigned)
@@ -187,25 +220,120 @@ def backtracking_schedule(
         search_steps=steps,
         failure_details=failure_details,
         stopped_by_limit=stopped_by_limit,
+        pruned_branches=pruned_branches,
     )
 
 
 def _select_next_course(
     unassigned_ids: Tuple[str, ...],
+    domains: Mapping[str, Tuple[str, ...]],
+    graph: ConflictGraph,
+) -> Tuple[str, Tuple[str, ...]]:
+    unassigned_id_set = set(unassigned_ids)
+    ranked = []
+    for course_id in unassigned_ids:
+        feasible_ids = domains[course_id]
+        remaining_neighbor_count = sum(
+            neighbor_id in unassigned_id_set
+            for neighbor_id in graph.neighbors(course_id)
+        )
+        ranked.append((len(feasible_ids), -remaining_neighbor_count, -graph.degree(course_id), course_id, feasible_ids))
+
+    _, _, _, selected_course_id, selected_feasible_ids = min(ranked)
+    return selected_course_id, selected_feasible_ids
+
+
+def _order_time_slots(
+    course_id: str,
+    feasible_ids: Tuple[str, ...],
+    remaining_ids: Tuple[str, ...],
+    domains: Mapping[str, Tuple[str, ...]],
+    graph: ConflictGraph,
+) -> Tuple[str, ...]:
+    remaining_id_set = set(remaining_ids)
+    unassigned_neighbor_ids = tuple(
+        neighbor_id for neighbor_id in graph.neighbors(course_id)
+        if neighbor_id in remaining_id_set
+    )
+    ranked = []
+    for index, time_slot_id in enumerate(feasible_ids):
+        constrained_neighbors = sum(
+            time_slot_id in domains[neighbor_id]
+            for neighbor_id in unassigned_neighbor_ids
+        )
+        ranked.append((constrained_neighbors, index, time_slot_id))
+
+    return tuple(time_slot_id for _, _, time_slot_id in sorted(ranked))
+
+
+def _forward_check_domains(
+    course_id: str,
+    time_slot_id: str,
+    remaining_ids: Tuple[str, ...],
+    domains: Mapping[str, Tuple[str, ...]],
     candidates_by_course_id: Mapping[str, Tuple[str, ...]],
     graph: ConflictGraph,
     assigned: Mapping[str, str],
-) -> Tuple[str, Tuple[str, ...]]:
-    ranked = []
-    for course_id in unassigned_ids:
-        feasible_ids = tuple(
-            time_slot_id for time_slot_id in candidates_by_course_id[course_id]
-            if _is_feasible(course_id, time_slot_id, graph, assigned)
-        )
-        ranked.append((len(feasible_ids), -graph.degree(course_id), course_id, feasible_ids))
+) -> Tuple[Mapping[str, Tuple[str, ...]], Optional[BacktrackingFailureDetail]]:
+    remaining_domains = {
+        remaining_id: domains[remaining_id]
+        for remaining_id in remaining_ids
+    }
+    neighbor_id_set = set(graph.neighbors(course_id))
 
-    _, _, selected_course_id, selected_feasible_ids = min(ranked)
-    return selected_course_id, selected_feasible_ids
+    for neighbor_id in remaining_ids:
+        if neighbor_id not in neighbor_id_set:
+            continue
+
+        reduced_domain = tuple(
+            candidate_id for candidate_id in remaining_domains[neighbor_id]
+            if candidate_id != time_slot_id
+        )
+        if not reduced_domain:
+            return remaining_domains, _build_failure_detail(
+                neighbor_id,
+                candidates_by_course_id[neighbor_id],
+                (),
+                graph,
+                assigned,
+                reason="Forward checking removed the last feasible time slot.",
+            )
+        remaining_domains[neighbor_id] = reduced_domain
+
+    return remaining_domains, None
+
+
+def _find_singleton_domain_conflicts(
+    candidates_by_course_id: Mapping[str, Tuple[str, ...]],
+    graph: ConflictGraph,
+) -> Tuple[BacktrackingFailureDetail, ...]:
+    details: list[BacktrackingFailureDetail] = []
+    for edge in graph.edges:
+        candidate_ids_a = candidates_by_course_id[edge.course_a_id]
+        candidate_ids_b = candidates_by_course_id[edge.course_b_id]
+        if len(candidate_ids_a) != 1 or candidate_ids_a != candidate_ids_b:
+            continue
+
+        reason = "Conflicting courses have the same only available time slot."
+        details.extend(
+            (
+                BacktrackingFailureDetail(
+                    course_id=edge.course_a_id,
+                    reason=reason,
+                    candidate_time_slot_ids=candidate_ids_a,
+                    feasible_time_slot_ids=candidate_ids_a,
+                    blocking_course_ids=(edge.course_b_id,),
+                ),
+                BacktrackingFailureDetail(
+                    course_id=edge.course_b_id,
+                    reason=reason,
+                    candidate_time_slot_ids=candidate_ids_b,
+                    feasible_time_slot_ids=candidate_ids_b,
+                    blocking_course_ids=(edge.course_a_id,),
+                ),
+            )
+        )
+    return _unique_failure_details(details)
 
 
 def _is_feasible(
