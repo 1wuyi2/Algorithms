@@ -85,6 +85,7 @@ def serialize_evaluation(result: ScheduleEvaluationResult) -> dict[str, object]:
         "issues": [_serialize_issue(issue) for issue in result.issues],
         "errors": [_serialize_issue(issue) for issue in result.errors],
         "warnings": [_serialize_issue(issue) for issue in result.warnings],
+        "metrics": dict(result.metrics),
     }
 
 
