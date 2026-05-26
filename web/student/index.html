@@ -8,74 +8,121 @@
   </head>
   <body>
     <div class="app-shell">
-      <header class="topbar">
-        <div>
-          <h1>学生端</h1>
-        </div>
-        <div class="user-actions">
-          <span id="studentIdentity">未登录</span>
-          <button id="logoutButton" type="button">退出</button>
-        </div>
-      </header>
-
-      <main class="layout">
-        <section class="panel profile-card">
+      <aside class="sidebar">
+        <div class="brand">
+          <div class="brand-mark">NK</div>
           <div>
-            <p class="section-label">个人信息</p>
-            <h2 id="studentName">学生用户</h2>
-            <dl>
-              <div><dt>学号</dt><dd id="studentId">2611222</dd></div>
-              <div><dt>专业</dt><dd>计算机科学与技术</dd></div>
-              <div><dt>年级</dt><dd>2023</dd></div>
-            </dl>
+            <h1>学生端智能推荐系统</h1>
+          </div>
+          <button class="sidebar-toggle" id="sidebarToggle" type="button" aria-label="收起导航" aria-expanded="true">
+            <span></span>
+            <span></span>
+            <span></span>
+          </button>
+        </div>
+        <nav class="nav-tabs" aria-label="学生端模块">
+          <a class="nav-tab active" href="#profile">个人首页</a>
+          <a class="nav-tab" href="#settings">推荐设置</a>
+          <a class="nav-tab" href="#schedule">当前课表</a>
+          <a class="nav-tab" href="#recommendations">推荐结果</a>
+        </nav>
+      </aside>
+
+      <main class="workspace">
+        <header class="topbar">
+          <div>
+            <p class="eyebrow">Student Portal</p>
+            <h2>学生端智能推荐系统</h2>
+          </div>
+          <div class="topbar-actions">
+            <span id="studentIdentity" class="identity-label">未登录</span>
+            <button id="logoutButton" class="ghost-button" type="button">退出</button>
+          </div>
+        </header>
+
+        <section class="metric-grid" aria-label="学习状态摘要">
+          <div class="metric">
+            <span>1</span>
+            <small>已修课程</small>
+          </div>
+          <div class="metric">
+            <span>2</span>
+            <small>当前课表</small>
+          </div>
+          <div class="metric">
+            <span id="recommendLimit">4</span>
+            <small>推荐上限</small>
           </div>
         </section>
 
-        <section class="panel settings-card">
-          <div class="panel-title">
-            <div>
-              <p class="section-label">推荐设置</p>
-              <h2>课程推荐</h2>
-            </div>
-            <button id="recommendButton" type="button">生成推荐</button>
-          </div>
-          <form id="recommendForm" class="settings-form">
-            <label>
-              兴趣方向
-              <input name="interests" value="algorithm, AI" />
-            </label>
-            <label>
-              推荐数量
-              <input name="topK" type="number" min="1" max="10" value="4" />
-            </label>
-            <label class="checkbox-row">
-              <input name="includeConflicted" type="checkbox" checked />
-              显示时间冲突课程
-            </label>
-          </form>
-          <p id="recommendStatus" class="status-text">可直接使用示例数据生成推荐；后端启动后会优先调用接口。</p>
-        </section>
+        <section class="view active">
+          <div id="profile"></div>
 
-        <section class="panel schedule-card">
-          <div class="panel-title">
-            <div>
-              <p class="section-label">当前课表</p>
-              <h2>本周课程</h2>
+          <section class="panel student-summary" aria-labelledby="studentName">
+            <div class="panel-title">
+              <h4>个人信息</h4>
             </div>
-          </div>
-          <div id="scheduleList" class="schedule-list"></div>
-        </section>
+            <div class="profile-block">
+              <span id="studentName" hidden>学生用户</span>
+              <dl class="detail-list profile-list">
+                <div>
+                  <dt>学号</dt>
+                  <dd id="studentId">2611222</dd>
+                </div>
+                <div>
+                  <dt>专业</dt>
+                  <dd>计算机科学与技术</dd>
+                </div>
+                <div>
+                  <dt>年级</dt>
+                  <dd>2023</dd>
+                </div>
+              </dl>
+            </div>
+          </section>
 
-        <section class="panel recommendations-card">
-          <div class="panel-title">
-            <div>
-              <p class="section-label">推荐结果</p>
-              <h2>适合你的课程</h2>
-            </div>
-            <span id="recommendationCount" class="count-badge">0 门</span>
-          </div>
-          <div id="recommendationList" class="recommendation-list">
-            <div class="empty-state">点击“生成推荐”查看课程列表</div>
+          <div class="student-grid">
+            <section class="panel settings-panel" id="settings">
+              <div class="panel-title">
+                <h4>推荐设置</h4>
+                <button id="recommendButton" class="primary-button" type="button">生成推荐</button>
+              </div>
+              <form id="recommendForm" class="settings-form">
+                <label>
+                  兴趣方向
+                  <input name="interests" value="algorithm, AI" autocomplete="off" />
+                </label>
+                <label>
+                  推荐数量
+                  <input name="topK" type="number" min="1" max="10" value="4" />
+                </label>
+                <label class="checkbox-row">
+                  <input name="includeConflicted" type="checkbox" checked />
+                  保留时间冲突课程
+                </label>
+              </form>
+              <p id="recommendStatus" class="result-strip">
+                可以直接用示例数据生成推荐；后端启动后会优先调用接口。
+              </p>
+            </section>
+
+            <section class="panel schedule-panel" id="schedule">
+              <div class="panel-title">
+                <h4>当前课表</h4>
+                <span>本周课程</span>
+              </div>
+              <div id="scheduleList" class="schedule-list"></div>
+            </section>
+
+            <section class="panel recommendations-panel" id="recommendations">
+              <div class="panel-title">
+                <h4>推荐结果</h4>
+                <span id="recommendationCount" class="badge neutral">0 门</span>
+              </div>
+              <div id="recommendationList" class="recommendation-list">
+                <div class="empty-state">点击“生成推荐”查看课程列表</div>
+              </div>
+            </section>
           </div>
         </section>
       </main>
