@@ -1,5 +1,12 @@
 const API_BASE_URL = "http://127.0.0.1:8000";
+const AUTH_KEY = "nankai-auth-session-v1";
 const STORAGE_KEY = "nankai-teacher-admin-state-v1";
+
+const authSession = readAuthSession();
+if (!authSession || authSession.role !== "teacher") {
+  window.location.replace("../login/index.html");
+  throw new Error("Teacher authentication required");
+}
 
 const weekdays = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"];
 const sectionTimeLabels = {
@@ -101,10 +108,11 @@ let collapsedOverviewRoomIds = new Set();
 
 const elements = {
   appShell: document.querySelector(".app-shell"),
+  teacherIdentity: document.querySelector("#teacherIdentity"),
+  logoutButton: document.querySelector("#logoutButton"),
   sidebarToggle: document.querySelector("#sidebarToggle"),
   views: document.querySelectorAll(".view"),
   navTabs: document.querySelectorAll(".nav-tab"),
-  apiStatus: document.querySelector("#apiStatus"),
   apiBaseLabel: document.querySelector("#apiBaseLabel"),
   courseCount: document.querySelector("#courseCount"),
   teacherCount: document.querySelector("#teacherCount"),
@@ -143,11 +151,17 @@ const elements = {
 };
 
 elements.apiBaseLabel.textContent = API_BASE_URL;
+elements.teacherIdentity.textContent = `${authSession.name || "教师用户"} ${authSession.account}`;
 
 elements.sidebarToggle.addEventListener("click", () => {
   const collapsed = elements.appShell.classList.toggle("sidebar-collapsed");
   elements.sidebarToggle.setAttribute("aria-expanded", String(!collapsed));
   elements.sidebarToggle.setAttribute("aria-label", collapsed ? "展开导航" : "收起导航");
+});
+
+elements.logoutButton.addEventListener("click", () => {
+  localStorage.removeItem(AUTH_KEY);
+  window.location.href = "../login/index.html";
 });
 
 elements.navTabs.forEach((tab) => {
@@ -905,11 +919,7 @@ function actionButtons(type, id) {
 }
 
 function setApiStatus(text, mode) {
-  if (!elements.apiStatus) return;
-  elements.apiStatus.textContent = text;
-  elements.apiStatus.className = "api-status";
-  if (mode === "online") elements.apiStatus.classList.add("online");
-  if (mode === "offline") elements.apiStatus.classList.add("offline");
+  return { text, mode };
 }
 
 function addLog(message) {
@@ -1010,6 +1020,15 @@ function loadState() {
     localStorage.removeItem(STORAGE_KEY);
   }
   return structuredClone(sampleState);
+}
+
+function readAuthSession() {
+  try {
+    return JSON.parse(localStorage.getItem(AUTH_KEY) || "null");
+  } catch {
+    localStorage.removeItem(AUTH_KEY);
+    return null;
+  }
 }
 
 function migrateSavedState(saved) {
