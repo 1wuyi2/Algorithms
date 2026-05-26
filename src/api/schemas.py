@@ -2,13 +2,71 @@
 
 from __future__ import annotations
 
+import re
+from dataclasses import dataclass
 from typing import Any, Mapping, Optional, Tuple
 
-from src.algorithms import GreedySchedulingOptions
+try:
+    from src.algorithms import GreedySchedulingOptions
+except ImportError:  # Backward compatibility with earlier project snapshots.
+    @dataclass(frozen=True)
+    class GreedySchedulingOptions:
+        prioritize_fixed_time: bool = True
+        sort_by_conflict_degree: bool = True
+        sort_by_candidate_count: bool = False
 from src.assistant import ScheduleInsight, ScheduleSuggestion
 from src.evaluation import EvaluationIssue, ScheduleEvaluationResult
 from src.models import Campus, Course, Room, RoomType, ScheduleAssignment, TimeSlot
-from src.recommendation import CourseRecommendation, RecommendableCourse, StudentProfile
+from src.recommendation import CourseRecommendation, RecommendableCourse, StudentProfile, StudentScheduleItem
+
+
+WEEKDAY_ALIASES = {
+    "1": 1,
+    "一": 1,
+    "星期一": 1,
+    "周一": 1,
+    "monday": 1,
+    "mon": 1,
+    "2": 2,
+    "二": 2,
+    "星期二": 2,
+    "周二": 2,
+    "tuesday": 2,
+    "tue": 2,
+    "3": 3,
+    "三": 3,
+    "星期三": 3,
+    "周三": 3,
+    "wednesday": 3,
+    "wed": 3,
+    "4": 4,
+    "四": 4,
+    "星期四": 4,
+    "周四": 4,
+    "thursday": 4,
+    "thu": 4,
+    "5": 5,
+    "五": 5,
+    "星期五": 5,
+    "周五": 5,
+    "friday": 5,
+    "fri": 5,
+    "6": 6,
+    "六": 6,
+    "星期六": 6,
+    "周六": 6,
+    "saturday": 6,
+    "sat": 6,
+    "7": 7,
+    "日": 7,
+    "天": 7,
+    "星期日": 7,
+    "星期天": 7,
+    "周日": 7,
+    "周天": 7,
+    "sunday": 7,
+    "sun": 7,
+}
 
 
 def parse_courses(items: object) -> Tuple[Course, ...]:
@@ -52,6 +110,14 @@ def parse_student_profile(item: object) -> StudentProfile:
             )
         ),
         interests=frozenset(str(value) for value in (_optional_any(data, "interests", "interests") or ())),
+        fixed_course_ids=frozenset(
+            str(value)
+            for value in (
+                _optional_any(data, "fixed_course_ids", "fixedCourseIds")
+                or _optional_any(data, "required_course_ids", "requiredCourseIds")
+                or ()
+            )
+        ),
     )
 
 
@@ -61,6 +127,21 @@ def parse_recommendable_courses(items: object) -> Tuple[RecommendableCourse, ...
     return tuple(
         _parse_recommendable_course(_expect_mapping(item, "recommendable_course"))
         for item in _expect_list(items, "courses")
+    )
+
+
+def parse_student_schedule_items(items: object) -> Tuple[StudentScheduleItem, ...]:
+    """Parse uploaded or manually entered student timetable items.
+
+    Supported fields include both snake_case and camelCase variants, for example:
+    course_id/courseId/id, course_name/courseName/name, time_slot_id/timeSlotId,
+    weekday/day, start_section/startSection, end_section/endSection, sections,
+    weeks, teacher_name/teacherName, classroom, and course_type/courseType.
+    """
+
+    return tuple(
+        _parse_student_schedule_item(_expect_mapping(item, "student_schedule_item"))
+        for item in _expect_list(items, "student_schedule")
     )
 
 
@@ -99,6 +180,26 @@ def serialize_assignments(assignments: Tuple[ScheduleAssignment, ...]) -> list[d
     ]
 
 
+def serialize_student_schedule_items(items: Tuple[StudentScheduleItem, ...]) -> list[dict[str, object]]:
+    """Convert student schedule items to JSON-serializable dictionaries."""
+
+    return [
+        {
+            "course_id": item.course_id,
+            "course_name": item.course_name,
+            "time_slot_id": item.time_slot_id,
+            "weekday": item.weekday,
+            "start_section": item.start_section,
+            "end_section": item.end_section,
+            "weeks": item.weeks,
+            "teacher_name": item.teacher_name,
+            "classroom": item.classroom,
+            "course_type": item.course_type,
+        }
+        for item in items
+    ]
+
+
 def serialize_evaluation(result: ScheduleEvaluationResult) -> dict[str, object]:
     """Convert an evaluation result to a JSON-serializable dictionary."""
 
@@ -108,7 +209,7 @@ def serialize_evaluation(result: ScheduleEvaluationResult) -> dict[str, object]:
         "issues": [_serialize_issue(issue) for issue in result.issues],
         "errors": [_serialize_issue(issue) for issue in result.errors],
         "warnings": [_serialize_issue(issue) for issue in result.warnings],
-        "metrics": dict(result.metrics),
+        "metrics": dict(getattr(result, "metrics", {})),
     }
 
 
@@ -134,10 +235,19 @@ def serialize_course_recommendations(recommendations: Tuple[CourseRecommendation
             "has_time_conflict": recommendation.has_time_conflict,
             "reasons": list(recommendation.reasons),
             "time_slot_id": recommendation.time_slot_id,
+            "course_type": recommendation.course_type,
+            "credit": recommendation.credit,
+            "teacher_name": recommendation.teacher_name,
+            "classroom": recommendation.classroom,
+            "weekday": recommendation.weekday,
+            "start_section": recommendation.start_section,
+            "end_section": recommendation.end_section,
+            "weeks": recommendation.weeks,
             "matched_interest_tags": list(recommendation.matched_interest_tags),
             "missing_prerequisite_ids": list(recommendation.missing_prerequisite_ids),
             "is_completed": recommendation.is_completed,
             "is_currently_selected": recommendation.is_currently_selected,
+            "is_fixed_selected": recommendation.is_fixed_selected,
         }
         for recommendation in recommendations
     ]
@@ -197,14 +307,43 @@ def _parse_assignment(item: Mapping[str, Any]) -> ScheduleAssignment:
     )
 
 
+def _parse_student_schedule_item(item: Mapping[str, Any]) -> StudentScheduleItem:
+    course_id = str(_first_present(item, "course_id", "courseId", "id", required=True))
+    course_name = str(_first_present(item, "course_name", "courseName", "name", default=""))
+    weekday = _parse_weekday(_first_present(item, "weekday", "day", "weekdayName", default=None))
+    start_section, end_section = _parse_sections(item)
+    time_slot_id = _optional_str(_first_present(item, "time_slot_id", "timeSlotId", default=None))
+    if not time_slot_id:
+        time_slot_id = _generated_time_slot_id(weekday, start_section, end_section)
+    return StudentScheduleItem(
+        course_id=course_id,
+        course_name=course_name,
+        time_slot_id=time_slot_id,
+        weekday=weekday,
+        start_section=start_section,
+        end_section=end_section,
+        weeks=_optional_str(_first_present(item, "weeks", "weekRange", "week_range", default=None)),
+        teacher_name=_optional_str(_first_present(item, "teacher_name", "teacherName", "teacher", default=None)),
+        classroom=_optional_str(_first_present(item, "classroom", "room", "location", default=None)),
+        course_type=_optional_str(_first_present(item, "course_type", "courseType", "category", default=None)),
+    )
+
+
 def _parse_recommendable_course(item: Mapping[str, Any]) -> RecommendableCourse:
+    weekday = _parse_weekday(_first_present(item, "weekday", "day", "weekdayName", default=None))
+    start_section, end_section = _parse_sections(item)
+    time_slot_id = _optional_str(_optional_any(item, "time_slot_id", "timeSlotId"))
+    if not time_slot_id and weekday and start_section and end_section:
+        time_slot_id = _generated_time_slot_id(weekday, start_section, end_section)
+    course_type = _optional_str(_first_present(item, "course_type", "courseType", "type", default=None))
+    category = _optional_str(_first_present(item, "category", "courseCategory", default=None))
     return RecommendableCourse(
         id=str(_required(item, "id")),
         name=str(_required(item, "name")),
         major_tags=tuple(str(value) for value in (_optional_any(item, "major_tags", "majorTags") or ())),
         grade_tags=tuple(str(value) for value in (_optional_any(item, "grade_tags", "gradeTags") or ())),
         interest_tags=tuple(str(value) for value in (_optional_any(item, "interest_tags", "interestTags") or ())),
-        time_slot_id=_optional_str(_optional_any(item, "time_slot_id", "timeSlotId")),
+        time_slot_id=time_slot_id,
         prerequisite_course_ids=tuple(
             str(value)
             for value in (
@@ -213,8 +352,15 @@ def _parse_recommendable_course(item: Mapping[str, Any]) -> RecommendableCourse:
                 or ()
             )
         ),
-        category=_optional_str(item.get("category")),
-        credit=_optional_float(item.get("credit")),
+        category=category or course_type,
+        credit=_optional_float(_first_present(item, "credit", "credits", default=None)),
+        course_type=course_type or category,
+        teacher_name=_optional_str(_first_present(item, "teacher_name", "teacherName", "teacher", default=None)),
+        classroom=_optional_str(_first_present(item, "classroom", "room", "location", default=None)),
+        weekday=weekday,
+        start_section=start_section,
+        end_section=end_section,
+        weeks=_optional_str(_first_present(item, "weeks", "weekRange", "week_range", default=None)),
     )
 
 
@@ -248,6 +394,47 @@ def _parse_campus(value: object) -> Optional[Campus]:
     return Campus(str(value))
 
 
+def _parse_weekday(value: object) -> Optional[int]:
+    if value in (None, ""):
+        return None
+    if isinstance(value, int):
+        return value
+    normalized = str(value).strip().casefold()
+    if normalized in WEEKDAY_ALIASES:
+        return WEEKDAY_ALIASES[normalized]
+    return int(normalized)
+
+
+def _parse_sections(item: Mapping[str, Any]) -> tuple[Optional[int], Optional[int]]:
+    sections = _first_present(item, "sections", "section", "periods", default=None)
+    if sections not in (None, ""):
+        if isinstance(sections, (list, tuple)) and sections:
+            values = [int(value) for value in sections]
+            return min(values), max(values)
+        match = re.findall(r"\d+", str(sections))
+        if match:
+            values = [int(value) for value in match]
+            return min(values), max(values)
+
+    start = _optional_int(_first_present(item, "start_section", "startSection", "start", default=None))
+    end = _optional_int(_first_present(item, "end_section", "endSection", "end", default=None))
+    if start is not None and end is None:
+        end = start
+    if end is not None and start is None:
+        start = end
+    return start, end
+
+
+def _generated_time_slot_id(
+    weekday: Optional[int],
+    start_section: Optional[int],
+    end_section: Optional[int],
+) -> str:
+    if weekday and start_section and end_section:
+        return f"D{weekday}-S{start_section}-{end_section}"
+    return "unknown-time-slot"
+
+
 def _required(item: Mapping[str, Any], key: str) -> object:
     if key not in item or item[key] in (None, ""):
         raise ValueError(f"Missing required field: {key}")
@@ -266,6 +453,20 @@ def _optional_any(item: Mapping[str, Any], snake_key: str, camel_key: str) -> ob
     if snake_key in item:
         return item[snake_key]
     return item.get(camel_key)
+
+
+def _first_present(
+    item: Mapping[str, Any],
+    *keys: str,
+    required: bool = False,
+    default: object = None,
+) -> object:
+    for key in keys:
+        if key in item and item[key] not in (None, ""):
+            return item[key]
+    if required:
+        raise ValueError(f"Missing required field: {keys[0]}")
+    return default
 
 
 def _optional_int(value: object) -> Optional[int]:

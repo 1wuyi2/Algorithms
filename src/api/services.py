@@ -7,7 +7,7 @@ from typing import Any, Mapping
 from src.algorithms import backtracking_schedule, greedy_color_schedule
 from src.assistant import analyze_schedule
 from src.evaluation import evaluate_schedule
-from src.recommendation import recommend_courses
+from src.recommendation import build_fixed_schedule_items, recommend_courses
 
 from .responses import success_payload
 from .schemas import (
@@ -17,9 +17,11 @@ from .schemas import (
     parse_recommendable_courses,
     parse_rooms,
     parse_student_profile,
+    parse_student_schedule_items,
     parse_time_slots,
     serialize_assignments,
     serialize_course_recommendations,
+    serialize_student_schedule_items,
     serialize_evaluation,
     serialize_insight,
 )
@@ -41,7 +43,7 @@ def run_greedy_schedule(payload: Mapping[str, Any]) -> dict[str, object]:
     courses = parse_courses(payload.get("courses"))
     time_slots = parse_time_slots(payload.get("time_slots") or payload.get("timeSlots"))
     options = parse_greedy_options(payload.get("options"))
-    result = greedy_color_schedule(courses, time_slots, options=options)
+    result = _run_greedy_with_options(courses, time_slots, options)
 
     data = {
         "algorithm": "greedy_coloring",
@@ -103,20 +105,20 @@ def compare_schedule_algorithms(payload: Mapping[str, Any]) -> dict[str, object]
     max_steps = int(payload.get("max_steps") or payload.get("maxSteps") or 100_000)
     options = parse_greedy_options(payload.get("options"))
 
-    greedy_result = greedy_color_schedule(courses, time_slots, options=options)
+    greedy_result = _run_greedy_with_options(courses, time_slots, options)
     backtracking_result = backtracking_schedule(
         courses,
         time_slots,
         conflict_graph=greedy_result.conflict_graph,
         max_steps=max_steps,
     )
-    greedy_evaluation = evaluate_schedule(
+    greedy_evaluation = _evaluate_schedule_with_time_slots(
         courses,
         greedy_result.assignments,
         conflict_graph=greedy_result.conflict_graph,
         time_slots=time_slots,
     )
-    backtracking_evaluation = evaluate_schedule(
+    backtracking_evaluation = _evaluate_schedule_with_time_slots(
         courses,
         backtracking_result.assignments,
         conflict_graph=greedy_result.conflict_graph,
@@ -146,7 +148,7 @@ def compare_schedule_algorithms(payload: Mapping[str, Any]) -> dict[str, object]
                 for item in greedy_result.unscheduled
             ],
             "issue_count": len(greedy_evaluation.issues),
-            "metrics": dict(greedy_evaluation.metrics),
+            "metrics": dict(getattr(greedy_evaluation, "metrics", {})),
         },
         "backtracking": {
             "is_complete": backtracking_result.is_complete,
@@ -167,7 +169,7 @@ def compare_schedule_algorithms(payload: Mapping[str, Any]) -> dict[str, object]
                 for detail in backtracking_result.failure_details
             ],
             "issue_count": len(backtracking_evaluation.issues),
-            "metrics": dict(backtracking_evaluation.metrics),
+            "metrics": dict(getattr(backtracking_evaluation, "metrics", {})),
         },
     }
     return success_payload(data)
@@ -180,7 +182,7 @@ def evaluate_schedule_payload(payload: Mapping[str, Any]) -> dict[str, object]:
     assignments = parse_assignments(payload.get("assignments"))
     rooms = parse_rooms(payload.get("rooms"))
     time_slots = parse_time_slots(payload.get("time_slots") or payload.get("timeSlots"))
-    data = serialize_evaluation(evaluate_schedule(courses, assignments, rooms=rooms, time_slots=time_slots))
+    data = serialize_evaluation(_evaluate_schedule_with_time_slots(courses, assignments, rooms=rooms, time_slots=time_slots))
     return success_payload(data)
 
 
@@ -211,11 +213,13 @@ def recommend_courses_payload(payload: Mapping[str, Any]) -> dict[str, object]:
         or payload.get("candidate_courses")
         or payload.get("candidateCourses")
     )
-    current_assignments = parse_assignments(
+    current_schedule = parse_student_schedule_items(
         payload.get("current_assignments")
         or payload.get("currentAssignments")
         or payload.get("current_schedule")
         or payload.get("currentSchedule")
+        or payload.get("uploaded_schedule")
+        or payload.get("uploadedSchedule")
         or ()
     )
     top_k = int(payload.get("top_k") or payload.get("topK") or 5)
@@ -225,22 +229,68 @@ def recommend_courses_payload(payload: Mapping[str, Any]) -> dict[str, object]:
         else payload.get("includeConflicted"),
         default=True,
     )
+    exclude_selected = _optional_bool(
+        payload.get("exclude_selected")
+        if "exclude_selected" in payload
+        else payload.get("excludeSelected"),
+        default=True,
+    )
+    fixed_course_ids = _parse_string_list(
+        payload.get("fixed_course_ids")
+        or payload.get("fixedCourseIds")
+        or payload.get("required_course_ids")
+        or payload.get("requiredCourseIds")
+        or ()
+    )
+    fixed_course_ids = tuple(dict.fromkeys(tuple(student.fixed_course_ids) + fixed_course_ids))
+    fixed_schedule_items = build_fixed_schedule_items(courses, fixed_course_ids)
+    selected_schedule = current_schedule + fixed_schedule_items
 
     recommendations = recommend_courses(
         student,
         courses,
-        current_assignments,
+        selected_schedule,
         top_k=top_k,
         include_conflicted=include_conflicted,
+        fixed_course_ids=fixed_course_ids,
+        exclude_selected=exclude_selected,
+    )
+    missing_fixed_course_ids = tuple(
+        course_id
+        for course_id in fixed_course_ids
+        if course_id not in {course.id for course in courses}
     )
     data = {
         "student_id": student.id,
         "candidate_count": len(courses),
         "top_k": top_k,
+        "include_conflicted": include_conflicted,
+        "exclude_selected": exclude_selected,
+        "fixed_course_ids": list(fixed_course_ids),
+        "missing_fixed_course_ids": list(missing_fixed_course_ids),
+        "selected_schedule": serialize_student_schedule_items(selected_schedule),
+        "fixed_selected_courses": serialize_student_schedule_items(fixed_schedule_items),
         "recommendations": serialize_course_recommendations(recommendations),
     }
     return success_payload(data)
 
+
+def _evaluate_schedule_with_time_slots(courses: object, assignments: object, **kwargs):
+    try:
+        return evaluate_schedule(courses, assignments, **kwargs)
+    except TypeError as exc:
+        if "time_slots" not in str(exc):
+            raise
+        kwargs.pop("time_slots", None)
+        return evaluate_schedule(courses, assignments, **kwargs)
+
+def _run_greedy_with_options(courses: object, time_slots: object, options: object):
+    try:
+        return greedy_color_schedule(courses, time_slots, options=options)
+    except TypeError as exc:
+        if "options" not in str(exc):
+            raise
+        return greedy_color_schedule(courses, time_slots)
 
 def _recommend_algorithm(
     *,
@@ -261,6 +311,16 @@ def _recommend_algorithm(
         return "greedy_coloring", "Both algorithms are complete with the same score; greedy is recommended for speed."
     return "backtracking_search", "Both algorithms are incomplete; backtracking provides stronger diagnostic information."
 
+
+def _parse_string_list(value: object) -> tuple[str, ...]:
+    if value in (None, ""):
+        return ()
+    if isinstance(value, str):
+        raw_items = value.replace("，", ",").replace("\n", ",").split(",")
+        return tuple(item.strip() for item in raw_items if item.strip())
+    if isinstance(value, (list, tuple, set, frozenset)):
+        return tuple(str(item).strip() for item in value if str(item).strip())
+    raise ValueError("Expected a string or list of strings")
 
 def _optional_bool(value: object, *, default: bool) -> bool:
     if value in (None, ""):
