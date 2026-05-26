@@ -172,6 +172,19 @@ code {
   align-items: center;
 }
 
+.topbar-actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.identity-label {
+  color: var(--muted);
+  font-size: 14px;
+}
+
 .topbar {
   margin-bottom: 20px;
 }
@@ -212,7 +225,6 @@ p {
   line-height: 1.6;
 }
 
-.api-status,
 .badge {
   display: inline-flex;
   align-items: center;
@@ -223,18 +235,11 @@ p {
   font-weight: 700;
 }
 
-.api-status {
-  color: var(--warning);
-  background: #fff6da;
-}
-
-.api-status.online,
 .badge.success {
   color: var(--success);
   background: #e8f7ef;
 }
 
-.api-status.offline,
 .badge.danger {
   color: var(--danger);
   background: #fff0ed;

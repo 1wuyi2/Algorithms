@@ -3,103 +3,84 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>南开大学学院排课系统 - 学生端推荐</title>
+    <title>南开大学学院级智能排课系统 - 学生端</title>
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
     <div class="app-shell">
-      <header class="hero">
+      <header class="topbar">
         <div>
-          <p class="eyebrow">Nankai University</p>
-          <h1>学生端个性化选课推荐</h1>
-          <p class="subtitle">根据专业、年级、已修课程、兴趣方向和当前课表，生成带推荐理由和冲突提示的课程列表。</p>
+          <h1>学生端</h1>
         </div>
-        <div class="hero-card">
-          <span id="recommendationCount">0</span>
-          <small>推荐课程</small>
+        <div class="user-actions">
+          <span id="studentIdentity">未登录</span>
+          <button id="logoutButton" type="button">退出</button>
         </div>
       </header>
 
       <main class="layout">
-        <section class="panel profile-panel">
-          <div class="panel-heading">
-            <h2>学生画像</h2>
-            <p>用于构建推荐分数，可替换为真实教务系统数据。</p>
+        <section class="panel profile-card">
+          <div>
+            <p class="section-label">个人信息</p>
+            <h2 id="studentName">学生用户</h2>
+            <dl>
+              <div><dt>学号</dt><dd id="studentId">2611222</dd></div>
+              <div><dt>专业</dt><dd>计算机科学与技术</dd></div>
+              <div><dt>年级</dt><dd>2023</dd></div>
+            </dl>
           </div>
-          <form id="studentForm" class="form-grid">
+        </section>
+
+        <section class="panel settings-card">
+          <div class="panel-title">
+            <div>
+              <p class="section-label">推荐设置</p>
+              <h2>课程推荐</h2>
+            </div>
+            <button id="recommendButton" type="button">生成推荐</button>
+          </div>
+          <form id="recommendForm" class="settings-form">
             <label>
-              学号
-              <input name="id" required value="S001" />
-            </label>
-            <label>
-              专业
-              <input name="major" required value="Computer Science" />
-            </label>
-            <label>
-              年级
-              <input name="grade" required value="2023" />
-            </label>
-            <label>
-              已修课程编号，逗号分隔
-              <input name="completedCourseIds" value="C001" />
-            </label>
-            <label class="wide">
-              兴趣方向，逗号分隔
+              兴趣方向
               <input name="interests" value="algorithm, AI" />
             </label>
             <label>
-              推荐数量 Top K
-              <input name="topK" type="number" min="1" value="5" />
+              推荐数量
+              <input name="topK" type="number" min="1" max="10" value="4" />
             </label>
             <label class="checkbox-row">
               <input name="includeConflicted" type="checkbox" checked />
-              保留时间冲突课程并显示冲突原因
+              显示时间冲突课程
             </label>
-            <button type="submit">生成推荐</button>
           </form>
+          <p id="recommendStatus" class="status-text">可直接使用示例数据生成推荐；后端启动后会优先调用接口。</p>
         </section>
 
-        <section class="panel schedule-panel">
-          <div class="panel-heading">
-            <h2>当前个人课表</h2>
-            <p>推荐算法会据此判断时间冲突。</p>
+        <section class="panel schedule-card">
+          <div class="panel-title">
+            <div>
+              <p class="section-label">当前课表</p>
+              <h2>本周课程</h2>
+            </div>
           </div>
-          <div class="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>课程编号</th>
-                  <th>时间槽</th>
-                </tr>
-              </thead>
-              <tbody id="scheduleBody"></tbody>
-            </table>
-          </div>
+          <div id="scheduleList" class="schedule-list"></div>
         </section>
 
-        <section class="panel data-panel">
-          <div class="panel-heading">
-            <h2>候选课程数据</h2>
-            <p>当前为前端测试样例，后续可由课程数据库或教务接口提供。</p>
-          </div>
-          <textarea id="coursesJson" spellcheck="false"></textarea>
-          <div class="actions">
-            <button id="resetSampleButton" type="button" class="secondary">恢复样例数据</button>
-            <button id="localPreviewButton" type="button" class="secondary">仅刷新当前课表</button>
-          </div>
-        </section>
-
-        <section class="panel results-panel">
-          <div class="panel-heading">
-            <h2>推荐结果</h2>
-            <p id="resultSummary">请点击“生成推荐”。</p>
+        <section class="panel recommendations-card">
+          <div class="panel-title">
+            <div>
+              <p class="section-label">推荐结果</p>
+              <h2>适合你的课程</h2>
+            </div>
+            <span id="recommendationCount" class="count-badge">0 门</span>
           </div>
           <div id="recommendationList" class="recommendation-list">
-            <div class="empty-state">暂无推荐结果</div>
+            <div class="empty-state">点击“生成推荐”查看课程列表</div>
           </div>
         </section>
       </main>
     </div>
+
     <script src="./app.js"></script>
   </body>
 </html>

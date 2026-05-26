@@ -4,6 +4,7 @@ from .errors import ApiError, error_payload
 from .responses import success_payload
 from .services import (
     analyze_schedule_payload,
+    authenticate_user_payload,
     compare_schedule_algorithms,
     evaluate_schedule_payload,
     health_response,
@@ -15,6 +16,7 @@ from .services import (
 __all__ = [
     "ApiError",
     "analyze_schedule_payload",
+    "authenticate_user_payload",
     "compare_schedule_algorithms",
     "error_payload",
     "evaluate_schedule_payload",

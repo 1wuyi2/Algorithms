@@ -27,6 +27,20 @@ from .schemas import (
 )
 
 
+DEMO_USERS: dict[str, dict[str, str]] = {
+    "9920260001": {
+        "password": "t123456",
+        "role": "teacher",
+        "name": "教师用户",
+    },
+    "2611222": {
+        "password": "s123456",
+        "role": "student",
+        "name": "学生用户",
+    },
+}
+
+
 def health_response() -> dict[str, object]:
     """Return a lightweight service health response."""
 
@@ -35,6 +49,37 @@ def health_response() -> dict[str, object]:
         "service": "nankai-scheduling-api",
     }
     return success_payload(data)
+
+
+def authenticate_user_payload(payload: Mapping[str, Any]) -> dict[str, object]:
+    """Authenticate a user account and return its portal role.
+
+    The current project stage keeps two demo accounts in memory. The data shape
+    mirrors the future database-backed user table so the frontend can keep using
+    the same API when persistence is added.
+    """
+
+    account = str(payload.get("account") or payload.get("user_id") or payload.get("userId") or "").strip()
+    password = str(payload.get("password") or "")
+    if not account or not password:
+        raise ValueError("Missing required field: account or password")
+
+    user = DEMO_USERS.get(account)
+    if user is None or user["password"] != password:
+        return success_payload({
+            "authenticated": False,
+            "reason": "学工号或密码错误",
+        })
+
+    return success_payload({
+        "authenticated": True,
+        "user": {
+            "account": account,
+            "role": user["role"],
+            "name": user["name"],
+        },
+        "token": f"demo-{user['role']}-{account}",
+    })
 
 
 def run_greedy_schedule(payload: Mapping[str, Any]) -> dict[str, object]:

@@ -1,4 +1,20 @@
 const API_BASE_URL = "http://127.0.0.1:8000";
+const AUTH_KEY = "nankai-auth-session-v1";
+
+const session = readSession();
+if (!session || session.role !== "student") {
+  window.location.replace("../login/index.html");
+  throw new Error("Student authentication required");
+}
+
+const studentProfile = {
+  id: "2611222",
+  name: "学生用户",
+  major: "Computer Science",
+  grade: "2023",
+  completedCourseIds: ["C001"],
+  interests: ["algorithm", "AI"],
+};
 
 const sampleCourses = [
   {
@@ -57,142 +73,177 @@ const sampleCourses = [
   },
 ];
 
-const sampleCurrentAssignments = [
-  { courseId: "C010", timeSlotId: "D1-S1" },
-  { courseId: "C011", timeSlotId: "D3-S2" },
+const currentAssignments = [
+  { courseId: "C010", courseName: "大学英语", timeSlotId: "D1-S1" },
+  { courseId: "C011", courseName: "线性代数", timeSlotId: "D3-S2" },
 ];
 
-const form = document.querySelector("#studentForm");
-const coursesJson = document.querySelector("#coursesJson");
-const scheduleBody = document.querySelector("#scheduleBody");
-const recommendationList = document.querySelector("#recommendationList");
-const recommendationCount = document.querySelector("#recommendationCount");
-const resultSummary = document.querySelector("#resultSummary");
+const elements = {
+  identity: document.querySelector("#studentIdentity"),
+  logoutButton: document.querySelector("#logoutButton"),
+  studentName: document.querySelector("#studentName"),
+  studentId: document.querySelector("#studentId"),
+  form: document.querySelector("#recommendForm"),
+  recommendButton: document.querySelector("#recommendButton"),
+  recommendStatus: document.querySelector("#recommendStatus"),
+  scheduleList: document.querySelector("#scheduleList"),
+  recommendationList: document.querySelector("#recommendationList"),
+  recommendationCount: document.querySelector("#recommendationCount"),
+};
 
-coursesJson.value = JSON.stringify(
-  {
+renderIdentity();
+renderSchedule();
+
+elements.logoutButton.addEventListener("click", () => {
+  localStorage.removeItem(AUTH_KEY);
+  window.location.href = "../login/index.html";
+});
+
+elements.recommendButton.addEventListener("click", generateRecommendations);
+
+async function generateRecommendations() {
+  const formData = new FormData(elements.form);
+  const interests = splitCsv(formData.get("interests"));
+  const topK = Number(formData.get("topK") || 4);
+  const includeConflicted = formData.get("includeConflicted") === "on";
+  const payload = {
+    student: {
+      id: studentProfile.id,
+      major: studentProfile.major,
+      grade: studentProfile.grade,
+      completedCourseIds: studentProfile.completedCourseIds,
+      interests,
+    },
     courses: sampleCourses,
-    currentAssignments: sampleCurrentAssignments,
-  },
-  null,
-  2,
-);
-renderSchedule(sampleCurrentAssignments);
+    currentAssignments,
+    topK,
+    includeConflicted,
+  };
 
-form.addEventListener("submit", async (event) => {
-  event.preventDefault();
-  resultSummary.textContent = "正在调用后端推荐接口……";
-
+  elements.recommendStatus.textContent = "正在生成推荐...";
   try {
-    const payload = buildPayload(new FormData(form));
     const response = await fetch(`${API_BASE_URL}/student/recommend`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     });
     const result = await response.json();
-    if (!response.ok) {
+    if (!response.ok || result.success === false) {
       throw new Error(result.error || "推荐接口返回错误");
     }
-    renderSchedule(payload.currentAssignments);
-    renderRecommendations(result.recommendations);
-    resultSummary.textContent = `已从 ${result.candidate_count} 门候选课程中生成 Top ${result.top_k} 推荐。`;
-  } catch (error) {
-    recommendationList.innerHTML = `<div class="error-state">${escapeHtml(
-      `推荐失败：${error.message}。请确认已运行 python -m src.api.server，且候选课程 JSON 格式正确。`,
-    )}</div>`;
-    recommendationCount.textContent = "0";
-    resultSummary.textContent = "推荐接口暂不可用。";
+    renderRecommendations(result.recommendations || []);
+    elements.recommendStatus.textContent = `已调用后端接口，从 ${result.candidate_count} 门候选课程中生成推荐。`;
+  } catch {
+    const fallback = localRecommend(payload);
+    renderRecommendations(fallback);
+    elements.recommendStatus.textContent = "后端接口暂不可用，已使用前端示例规则生成推荐。";
   }
-});
-
-document.querySelector("#resetSampleButton").addEventListener("click", () => {
-  coursesJson.value = JSON.stringify(
-    {
-      courses: sampleCourses,
-      currentAssignments: sampleCurrentAssignments,
-    },
-    null,
-    2,
-  );
-  renderSchedule(sampleCurrentAssignments);
-});
-
-document.querySelector("#localPreviewButton").addEventListener("click", () => {
-  const parsed = parseCourseInput();
-  renderSchedule(parsed.currentAssignments);
-});
-
-function buildPayload(formData) {
-  const parsed = parseCourseInput();
-  return {
-    student: {
-      id: formData.get("id").trim(),
-      major: formData.get("major").trim(),
-      grade: formData.get("grade").trim(),
-      completedCourseIds: splitCsv(formData.get("completedCourseIds")),
-      interests: splitCsv(formData.get("interests")),
-    },
-    courses: parsed.courses,
-    currentAssignments: parsed.currentAssignments,
-    topK: Number(formData.get("topK") || 5),
-    includeConflicted: formData.get("includeConflicted") === "on",
-  };
 }
 
-function parseCourseInput() {
-  const parsed = JSON.parse(coursesJson.value || "{}");
-  return {
-    courses: Array.isArray(parsed.courses) ? parsed.courses : [],
-    currentAssignments: Array.isArray(parsed.currentAssignments) ? parsed.currentAssignments : [],
-  };
+function renderIdentity() {
+  elements.identity.textContent = `${session.name || "学生用户"} ${session.account}`;
+  elements.studentName.textContent = session.name || studentProfile.name;
+  elements.studentId.textContent = session.account || studentProfile.id;
 }
 
-function renderSchedule(assignments) {
-  if (!assignments.length) {
-    scheduleBody.innerHTML = '<tr><td colspan="2">暂无当前课表</td></tr>';
-    return;
-  }
-  scheduleBody.innerHTML = assignments
-    .map((item) => {
-      return `<tr>
-        <td>${escapeHtml(item.courseId || item.course_id)}</td>
-        <td>${escapeHtml(item.timeSlotId || item.time_slot_id)}</td>
-      </tr>`;
-    })
+function renderSchedule() {
+  elements.scheduleList.innerHTML = currentAssignments
+    .map((item) => `<article class="schedule-item">
+      <strong>${escapeHtml(item.courseName)} (${escapeHtml(item.courseId)})</strong>
+      <span>${escapeHtml(formatSlot(item.timeSlotId))}</span>
+    </article>`)
     .join("");
 }
 
 function renderRecommendations(items) {
-  recommendationCount.textContent = items.length;
+  elements.recommendationCount.textContent = `${items.length} 门`;
   if (!items.length) {
-    recommendationList.innerHTML = '<div class="empty-state">没有符合过滤条件的推荐课程。</div>';
+    elements.recommendationList.innerHTML = '<div class="empty-state">暂无符合条件的推荐课程</div>';
     return;
   }
 
-  recommendationList.innerHTML = items
+  elements.recommendationList.innerHTML = items
     .map((item) => {
-      const badgeClass = item.has_time_conflict ? "badge danger" : "badge success";
-      const badgeText = item.has_time_conflict ? "时间冲突" : "时间可选";
-      return `<article class="recommendation-card">
-        <div class="card-main">
+      const conflict = Boolean(item.has_time_conflict);
+      const missing = item.missing_prerequisite_ids || [];
+      const tags = item.matched_interest_tags || [];
+      return `<article class="course-card">
+        <div class="course-head">
           <div>
-            <p class="course-id">${escapeHtml(item.course_id)}</p>
-            <h3>${escapeHtml(item.course_name)}</h3>
+            <strong>${escapeHtml(item.course_name)} (${escapeHtml(item.course_id)})</strong>
+            <div class="course-meta">${escapeHtml(item.category || "课程")} · ${escapeHtml(item.credit || "-")} 学分 · ${escapeHtml(formatSlot(item.time_slot_id))}</div>
           </div>
           <div class="score">${escapeHtml(item.score)}</div>
         </div>
-        <div class="meta-row">
-          <span class="${badgeClass}">${badgeText}</span>
-          <span>${escapeHtml(item.time_slot_id || "待定时间")}</span>
-          ${item.is_completed ? '<span class="badge muted">已修读</span>' : ""}
+        <div class="tag-row">
+          <span class="badge ${conflict ? "danger" : "success"}">${conflict ? "时间冲突" : "时间可选"}</span>
+          ${tags.map((tag) => `<span class="badge neutral">${escapeHtml(tag)}</span>`).join("")}
+          ${missing.length ? `<span class="badge warning">缺少先修：${escapeHtml(missing.join(", "))}</span>` : ""}
         </div>
-        <ul>
-          ${item.reasons.map((reason) => `<li>${escapeHtml(reason)}</li>`).join("")}
-        </ul>
+        <div class="course-reasons">${(item.reasons || []).map(escapeHtml).join("；")}</div>
       </article>`;
     })
     .join("");
+}
+
+function localRecommend(payload) {
+  const busySlots = new Set(payload.currentAssignments.map((item) => item.timeSlotId || item.time_slot_id));
+  return payload.courses
+    .map((course) => {
+      let score = 50;
+      const reasons = [];
+      const matchedInterestTags = (course.interestTags || []).filter((tag) =>
+        payload.student.interests.some((interest) => interest.toLowerCase() === tag.toLowerCase()),
+      );
+      const missing = (course.prerequisiteCourseIds || []).filter((id) => !payload.student.completedCourseIds.includes(id));
+      const hasConflict = busySlots.has(course.timeSlotId);
+
+      if ((course.majorTags || []).includes(payload.student.major)) {
+        score += 20;
+        reasons.push("专业匹配");
+      }
+      if ((course.gradeTags || []).includes(payload.student.grade)) {
+        score += 10;
+        reasons.push("年级匹配");
+      }
+      if (matchedInterestTags.length) {
+        score += matchedInterestTags.length * 10;
+        reasons.push(`兴趣命中：${matchedInterestTags.join(", ")}`);
+      }
+      if (missing.length) {
+        score -= 25;
+        reasons.push(`缺少先修课程：${missing.join(", ")}`);
+      }
+      if (hasConflict) {
+        score -= 20;
+        reasons.push("与当前课表存在时间冲突");
+      }
+
+      return {
+        course_id: course.id,
+        course_name: course.name,
+        score: Math.max(score, 0),
+        has_time_conflict: hasConflict,
+        matched_interest_tags: matchedInterestTags,
+        missing_prerequisite_ids: missing,
+        reasons,
+        time_slot_id: course.timeSlotId,
+        category: course.category,
+        credit: course.credit,
+      };
+    })
+    .filter((item) => payload.includeConflicted || !item.has_time_conflict)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, payload.topK);
+}
+
+function readSession() {
+  try {
+    return JSON.parse(localStorage.getItem(AUTH_KEY) || "null");
+  } catch {
+    localStorage.removeItem(AUTH_KEY);
+    return null;
+  }
 }
 
 function splitCsv(value) {
@@ -202,8 +253,15 @@ function splitCsv(value) {
     .filter(Boolean);
 }
 
+function formatSlot(slotId) {
+  const match = String(slotId || "").match(/^D(\d+)-S(\d+)$/);
+  if (!match) return slotId || "待定";
+  const weekdays = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"];
+  return `${weekdays[Number(match[1]) - 1] || `第${match[1]}天`} 第 ${match[2]} 节`;
+}
+
 function escapeHtml(value) {
-  return String(value)
+  return String(value ?? "")
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;")

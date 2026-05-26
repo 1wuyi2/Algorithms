@@ -4,6 +4,7 @@ import unittest
 
 from src.api import (
     analyze_schedule_payload,
+    authenticate_user_payload,
     compare_schedule_algorithms,
     error_payload,
     evaluate_schedule_payload,
@@ -48,6 +49,25 @@ class ApiServiceTests(unittest.TestCase):
         self.assertFalse(response["success"])
         self.assertEqual(response["code"], "VALIDATION_ERROR")
         self.assertEqual(response["error"], "Missing field")
+
+    def test_authenticate_teacher_demo_user(self):
+        response = authenticate_user_payload({"account": "9920260001", "password": "t123456"})
+
+        self.assertTrue(response["success"])
+        self.assertTrue(response["authenticated"])
+        self.assertEqual(response["user"]["role"], "teacher")
+
+    def test_authenticate_student_demo_user(self):
+        response = authenticate_user_payload({"account": "2611222", "password": "s123456"})
+
+        self.assertTrue(response["authenticated"])
+        self.assertEqual(response["user"]["role"], "student")
+
+    def test_authenticate_rejects_bad_password(self):
+        response = authenticate_user_payload({"account": "2611222", "password": "wrong"})
+
+        self.assertTrue(response["success"])
+        self.assertFalse(response["authenticated"])
 
     def test_run_greedy_schedule(self):
         payload = {

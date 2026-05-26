@@ -13,6 +13,7 @@ from typing import Any, Callable, Mapping
 from .errors import ApiError, error_payload
 from .services import (
     analyze_schedule_payload,
+    authenticate_user_payload,
     compare_schedule_algorithms,
     evaluate_schedule_payload,
     health_response,
@@ -24,6 +25,7 @@ from .services import (
 JsonHandler = Callable[[Mapping[str, Any]], dict[str, object]]
 
 POST_ROUTES: dict[str, JsonHandler] = {
+    "/auth/login": authenticate_user_payload,
     "/schedule/greedy": run_greedy_schedule,
     "/schedule/backtracking": run_backtracking_schedule,
     "/schedule/compare": compare_schedule_algorithms,
