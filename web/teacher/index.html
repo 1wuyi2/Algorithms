@@ -1,0 +1,268 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>南开大学学院排课系统 - 教师端管理</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="brand">
+          <div class="brand-mark">NK</div>
+          <div>
+            <h1>学院排课系统</h1>
+            <p>教师端管理工作台</p>
+          </div>
+          <button class="sidebar-toggle" id="sidebarToggle" type="button" aria-label="收起导航" aria-expanded="true">
+            <span></span>
+            <span></span>
+            <span></span>
+          </button>
+        </div>
+        <nav class="nav-tabs" aria-label="教师端模块">
+          <button class="nav-tab active" type="button" data-view="overview">总览</button>
+          <button class="nav-tab" type="button" data-view="courses">课程管理</button>
+          <button class="nav-tab" type="button" data-view="teachers">教师管理</button>
+          <button class="nav-tab" type="button" data-view="rooms">教室管理</button>
+          <button class="nav-tab" type="button" data-view="timeslots">时间槽管理</button>
+          <button class="nav-tab" type="button" data-view="scheduler">自动排课</button>
+          <button class="nav-tab" type="button" data-view="timetable">课表展示</button>
+          <button class="nav-tab" type="button" data-view="issues">冲突与评分</button>
+        </nav>
+      </aside>
+
+      <main class="workspace">
+        <header class="topbar">
+          <div>
+            <p class="eyebrow">Nankai University</p>
+            <h2>学院级智能排课</h2>
+          </div>
+        </header>
+
+        <section class="metric-grid" aria-label="数据概览">
+          <button class="metric" type="button" data-overview-detail="courses"><span id="courseCount">0</span><small>课程</small></button>
+          <button class="metric" type="button" data-overview-detail="teachers"><span id="teacherCount">0</span><small>教师</small></button>
+          <button class="metric" type="button" data-overview-detail="rooms"><span id="roomCount">0</span><small>教室</small></button>
+          <button class="metric" type="button" data-overview-detail="timeSlots"><span id="timeSlotCount">0</span><small>时间槽</small></button>
+          <button class="metric" type="button" data-overview-detail="assignments"><span id="assignmentCount">0</span><small>已排课程</small></button>
+          <button class="metric" type="button" data-overview-detail="score"><span id="scoreValue">--</span><small>课表评分</small></button>
+        </section>
+
+        <section class="view active" id="view-overview">
+          <section class="panel overview-detail-panel" id="overviewDetailPanel">
+            <div class="panel-title">
+              <h4 id="overviewDetailTitle">课程详情</h4>
+              <span id="overviewDetailHint"></span>
+            </div>
+            <div id="overviewDetailBody" class="overview-detail-body"></div>
+          </section>
+
+          <div class="section-heading">
+            <div>
+              <h3>系统总览</h3>
+            </div>
+            <div class="actions">
+              <button class="secondary-button" id="loadSampleButton" type="button">载入样例数据</button>
+              <button class="ghost-button" id="clearAllButton" type="button">清空本地数据</button>
+            </div>
+          </div>
+
+          <div class="overview-grid">
+            <section class="panel">
+              <div class="panel-title">
+                <h4>联调状态</h4>
+                <button class="secondary-button" id="healthCheckButton" type="button">检测后端</button>
+              </div>
+              <dl class="detail-list">
+                <div><dt>后端地址</dt><dd id="apiBaseLabel"></dd></div>
+                <div><dt>推荐启动命令</dt><dd><code>python -m src.api.server</code></dd></div>
+                <div><dt>当前算法范围</dt><dd>课程到时间槽，教室分配暂按后续模块扩展</dd></div>
+              </dl>
+            </section>
+
+            <section class="panel">
+              <div class="panel-title">
+                <h4>最近结果</h4>
+                <button class="ghost-button" id="exportJsonButton" type="button">导出 JSON</button>
+              </div>
+              <div class="result-strip" id="latestSummary">尚未生成课表。</div>
+            </section>
+          </div>
+        </section>
+
+        <section class="view" id="view-courses">
+          <div class="section-heading">
+            <div>
+              <h3>课程管理</h3>
+              <p>维护课程代码、任课教师、课程编号、候选时间和课程约束。</p>
+            </div>
+          </div>
+          <form class="panel form-grid" id="courseForm">
+            <label>课程代码<input name="id" required placeholder="COCS0010" /></label>
+            <label>课程名称<input name="name" required placeholder="算法设计与分析" /></label>
+            <label>教师学工号<input name="teacherId" required placeholder="9920260001" list="teacherIds" /></label>
+            <label>课程编号，逗号分隔<input name="classGroupIds" required placeholder="1001" /></label>
+            <label>周学时<input name="weeklyHours" type="number" min="1" value="2" /></label>
+            <label>预计人数<input name="expectedStudents" type="number" min="0" placeholder="60" /></label>
+            <label>教室类型
+              <select name="requiredRoomType">
+                <option value="general">普通教室</option>
+                <option value="computer_lab">机房</option>
+                <option value="lab">实验室</option>
+                <option value="multimedia">多媒体教室</option>
+              </select>
+            </label>
+            <label>校区
+              <select name="requiredCampus">
+                <option value="">不限</option>
+                <option value="jinnan">津南校区</option>
+                <option value="balitai">八里台校区</option>
+              </select>
+            </label>
+            <label>固定时间槽<input name="fixedTimeSlotId" placeholder="D1-S1，可留空" list="timeSlotIds" /></label>
+            <label class="wide">候选时间槽，逗号分隔<input name="candidateTimeSlotIds" placeholder="D1-S1,D1-S2，可留空表示全部可用" /></label>
+            <button type="submit">保存课程</button>
+          </form>
+          <div class="panel table-panel">
+            <div class="panel-title"><h4>课程列表</h4><span id="courseTableHint"></span></div>
+            <div class="table-wrap"><table><thead><tr><th>课程代码</th><th>名称</th><th>教师</th><th>课程编号</th><th>约束</th><th>操作</th></tr></thead><tbody id="courseTableBody"></tbody></table></div>
+          </div>
+        </section>
+
+        <section class="view" id="view-teachers">
+          <div class="section-heading">
+            <div><h3>教师管理</h3><p>维护教师基础信息和不可排时间。</p></div>
+          </div>
+          <form class="panel form-grid" id="teacherForm">
+            <label>教师学工号<input name="id" required placeholder="9920260001" /></label>
+            <label>教师姓名<input name="name" required placeholder="王老师" /></label>
+            <label class="wide">不可用时间槽，逗号分隔<input name="unavailableTimeSlotIds" placeholder="D1-S1,D3-S5" /></label>
+            <button type="submit">保存教师</button>
+          </form>
+          <div class="panel table-panel"><div class="table-wrap"><table><thead><tr><th>学工号</th><th>姓名</th><th>不可用时间</th><th>操作</th></tr></thead><tbody id="teacherTableBody"></tbody></table></div></div>
+        </section>
+
+        <section class="view" id="view-rooms">
+          <div class="section-heading">
+            <div><h3>教室管理</h3><p>当前排课算法暂不正式分配教室；评价接口可检查容量、类型、校区和重复占用。</p></div>
+          </div>
+          <form class="panel form-grid" id="roomForm">
+            <label>教室编号<input name="id" required placeholder="公教楼A101" /></label>
+            <label>教室名称<input name="name" required placeholder="津南公共教学楼 A101" /></label>
+            <label>容量<input name="capacity" required type="number" min="1" value="60" /></label>
+            <label>教室类型
+              <select name="roomType">
+                <option value="general">普通教室</option>
+                <option value="computer_lab">机房</option>
+                <option value="lab">实验室</option>
+                <option value="multimedia">多媒体教室</option>
+              </select>
+            </label>
+            <label>校区
+              <select name="campus">
+                <option value="">未指定</option>
+                <option value="jinnan">津南校区</option>
+                <option value="balitai">八里台校区</option>
+              </select>
+            </label>
+            <label>楼宇<input name="building" placeholder="公共教学楼 A 区" /></label>
+            <label class="wide">可用时间槽，逗号分隔<input name="availableTimeSlotIds" placeholder="留空表示暂不限制" /></label>
+            <button type="submit">保存教室</button>
+          </form>
+          <div class="panel table-panel"><div class="table-wrap"><table><thead><tr><th>编号</th><th>名称</th><th>容量</th><th>类型</th><th>校区</th><th>操作</th></tr></thead><tbody id="roomTableBody"></tbody></table></div></div>
+        </section>
+
+        <section class="view" id="view-timeslots">
+          <div class="section-heading">
+            <div><h3>时间槽管理</h3><p>配置算法可用的上课时间。可一键生成一周 7 天、每天 14 节的基础时间槽。</p></div>
+            <div class="actions">
+              <button class="secondary-button" id="generateWeekSlotsButton" type="button">生成默认周课表</button>
+            </div>
+          </div>
+          <form class="panel form-grid" id="timeSlotForm">
+            <label>时间槽编号<input name="id" required placeholder="D1-S1" /></label>
+            <label>星期<select name="weekday"><option value="1">周一</option><option value="2">周二</option><option value="3">周三</option><option value="4">周四</option><option value="5">周五</option><option value="6">周六</option><option value="7">周日</option></select></label>
+            <label>开始节次<input name="startSection" required type="number" min="1" max="14" value="1" /></label>
+            <label>结束节次<input name="endSection" required type="number" min="1" max="14" value="1" /></label>
+            <label>开始时间<input name="startTime" placeholder="08:00" /></label>
+            <label>结束时间<input name="endTime" placeholder="08:45" /></label>
+            <label class="wide">显示标签<input name="label" placeholder="周一第1节" /></label>
+            <button type="submit">保存时间槽</button>
+          </form>
+          <div class="panel table-panel"><div class="table-wrap"><table><thead><tr><th>编号</th><th>星期</th><th>节次</th><th>时间</th><th>操作</th></tr></thead><tbody id="timeSlotTableBody"></tbody></table></div></div>
+        </section>
+
+        <section class="view" id="view-scheduler">
+          <div class="section-heading">
+            <div><h3>自动排课</h3></div>
+          </div>
+          <div class="panel scheduler-panel">
+            <div>
+              <h4>算法选择</h4>
+              <div class="segmented" id="algorithmControl">
+                <button class="selected" type="button" data-algorithm="greedy">贪心图染色</button>
+                <button type="button" data-algorithm="backtracking">回溯搜索</button>
+                <button type="button" data-algorithm="compare">自动对比</button>
+              </div>
+            </div>
+            <div class="option-grid">
+              <label class="checkbox-row"><input id="prioritizeFixedTime" type="checkbox" checked />优先固定时间</label>
+              <label class="checkbox-row"><input id="sortByConflictDegree" type="checkbox" checked />按冲突度排序</label>
+              <label class="checkbox-row"><input id="sortByCandidateCount" type="checkbox" />候选时间少者优先</label>
+              <label>回溯最大步数<input id="maxStepsInput" type="number" min="1" value="100000" /></label>
+            </div>
+            <button id="runScheduleButton" type="button">生成课表并评价</button>
+          </div>
+          <div class="panel log-panel">
+            <div class="panel-title"><h4>运行日志</h4><button class="ghost-button" id="clearLogButton" type="button">清空日志</button></div>
+            <div id="runLog" class="run-log">等待运行。</div>
+          </div>
+        </section>
+
+        <section class="view" id="view-timetable">
+          <div class="section-heading">
+            <div><h3>课表展示</h3><p>按课程、教师或班级筛选当前排课结果。</p></div>
+            <label class="inline-filter">筛选<input id="timetableFilter" placeholder="课程/教师/课程编号" /></label>
+          </div>
+          <div class="panel timetable-panel">
+            <div id="timetableGrid" class="timetable-grid"></div>
+          </div>
+          <div class="panel table-panel">
+            <div class="panel-title"><h4>排课明细</h4><span id="assignmentHint"></span></div>
+            <div class="table-wrap"><table><thead><tr><th>课程</th><th>教师</th><th>课程编号</th><th>时间槽</th><th>教室</th></tr></thead><tbody id="assignmentTableBody"></tbody></table></div>
+          </div>
+        </section>
+
+        <section class="view" id="view-issues">
+          <div class="section-heading">
+            <div><h3>冲突与评分</h3><p>集中展示课表评价错误、警告、指标和规则化辅助建议。</p></div>
+            <div class="actions">
+              <button class="secondary-button" id="evaluateButton" type="button">重新评价</button>
+              <button class="secondary-button" id="analyzeButton" type="button">辅助分析</button>
+            </div>
+          </div>
+          <div class="issue-layout">
+            <section class="panel">
+              <div class="panel-title"><h4>评分与指标</h4><span id="feasibleBadge" class="badge neutral">未评价</span></div>
+              <div id="metricsGrid" class="metrics-detail"></div>
+            </section>
+            <section class="panel">
+              <div class="panel-title"><h4>问题列表</h4><span id="issueCountLabel"></span></div>
+              <div id="issueList" class="issue-list"><div class="empty-state">暂无冲突信息</div></div>
+            </section>
+            <section class="panel wide-panel">
+              <div class="panel-title"><h4>辅助排课建议</h4><span id="riskBadge" class="badge neutral">未分析</span></div>
+              <div id="suggestionList" class="suggestion-list"><div class="empty-state">暂无建议</div></div>
+            </section>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <datalist id="teacherIds"></datalist>
+    <datalist id="timeSlotIds"></datalist>
+    <script src="./app.js"></script>
+  </body>
+</html>
