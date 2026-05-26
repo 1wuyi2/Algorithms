@@ -1,20 +1,22 @@
 """Minimal HTTP API server for the scheduling project.
 
 Run from the repository root with:
+
     python -m src.api.server
 """
-
 
 from __future__ import annotations
 
 import json
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import Any, Callable, Mapping
+from typing import Any, Callable, Dict, Mapping
 
 from .errors import ApiError, error_payload
 from .services import (
+    ai_analyze_schedule_payload,
+    ai_answer_question,
+    ai_explain_schedule,
     analyze_schedule_payload,
-    authenticate_user_payload,
     compare_schedule_algorithms,
     evaluate_schedule_payload,
     health_response,
@@ -23,23 +25,19 @@ from .services import (
     run_greedy_schedule,
 )
 
-# 新增导入
-from src.database.session import init_db, get_session
-from src.database.models import CourseDB, TeacherDB, ClassroomDB
-from src.importer.parser import parse_catalog_file
-from src.importer.cleaner import clean_course_data
-from src.importer.validator import validate_all
-import os
 
-JsonHandler = Callable[[Mapping[str, Any]], dict[str, object]]
+JsonHandler = Callable
 
-POST_ROUTES: dict[str, JsonHandler] = {
-    "/auth/login": authenticate_user_payload,
+
+POST_ROUTES: Dict[str, JsonHandler] = {
     "/schedule/greedy": run_greedy_schedule,
     "/schedule/backtracking": run_backtracking_schedule,
     "/schedule/compare": compare_schedule_algorithms,
     "/schedule/evaluate": evaluate_schedule_payload,
     "/assistant/analyze": analyze_schedule_payload,
+    "/assistant/ai-analyze": ai_analyze_schedule_payload,
+    "/assistant/ask": ai_answer_question,
+    "/assistant/explain": ai_explain_schedule,
     "/student/recommend": recommend_courses_payload,
 }
 
@@ -56,38 +54,7 @@ class SchedulingApiHandler(BaseHTTPRequestHandler):
         if self.path == "/health":
             self._send_json(health_response())
             return
-        # 新增课程列表查询
-        if self.path.startswith("/courses"):
-            self._handle_get_courses()
-            return
         self._send_json(error_payload("NOT_FOUND", "Not found"), status=404)
-
-    def _handle_get_courses(self) -> None:
-        from urllib.parse import parse_qs, urlparse
-        session = get_session()
-        parsed = urlparse(self.path)
-        params = parse_qs(parsed.query)
-        semester = params.get("semester", [None])[0]
-        query = session.query(CourseDB)
-        if semester:
-            query = query.filter(CourseDB.semester == semester)
-        courses = query.limit(500).all()
-        data = [
-            {
-                "course_code": c.course_code,
-                "course_name": c.course_name,
-                "teacher_name": c.teacher_name,
-                "weekday": c.weekday,
-                "start_section": c.start_section,
-                "end_section": c.end_section,
-                "classroom": c.classroom,
-                "semester": c.semester,
-            }
-            for c in courses
-        ]
-        self._send_json({"success": True, "data": data})
-
-
 
     def do_POST(self) -> None:
         handler = POST_ROUTES.get(self.path)
@@ -114,11 +81,13 @@ class SchedulingApiHandler(BaseHTTPRequestHandler):
         length = int(self.headers.get("Content-Length", "0"))
         if length == 0:
             return {}
+
         raw_body = self.rfile.read(length)
         try:
             payload = json.loads(raw_body.decode("utf-8"))
         except json.JSONDecodeError as exc:
             raise ApiError("INVALID_JSON", "Request body must be valid JSON", status=400) from exc
+
         if not isinstance(payload, Mapping):
             raise ValueError("Request JSON body must be an object")
         return payload
@@ -143,7 +112,7 @@ class SchedulingApiHandler(BaseHTTPRequestHandler):
 
 def run(host: str = "127.0.0.1", port: int = 8000) -> None:
     """Start the API server."""
-    init_db() 
+
     server = ThreadingHTTPServer((host, port), SchedulingApiHandler)
     print(f"Scheduling API running at http://{host}:{port}")
     server.serve_forever()
