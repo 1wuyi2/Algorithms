@@ -4,6 +4,7 @@ Run from the repository root with:
     python -m src.api.server
 """
 
+
 from __future__ import annotations
 
 import json
@@ -21,6 +22,14 @@ from .services import (
     run_backtracking_schedule,
     run_greedy_schedule,
 )
+
+# 新增导入
+from src.database.session import init_db, get_session
+from src.database.models import CourseDB, TeacherDB, ClassroomDB
+from src.importer.parser import parse_catalog_file
+from src.importer.cleaner import clean_course_data
+from src.importer.validator import validate_all
+import os
 
 JsonHandler = Callable[[Mapping[str, Any]], dict[str, object]]
 
@@ -47,7 +56,38 @@ class SchedulingApiHandler(BaseHTTPRequestHandler):
         if self.path == "/health":
             self._send_json(health_response())
             return
+        # 新增课程列表查询
+        if self.path.startswith("/courses"):
+            self._handle_get_courses()
+            return
         self._send_json(error_payload("NOT_FOUND", "Not found"), status=404)
+
+    def _handle_get_courses(self) -> None:
+        from urllib.parse import parse_qs, urlparse
+        session = get_session()
+        parsed = urlparse(self.path)
+        params = parse_qs(parsed.query)
+        semester = params.get("semester", [None])[0]
+        query = session.query(CourseDB)
+        if semester:
+            query = query.filter(CourseDB.semester == semester)
+        courses = query.limit(500).all()
+        data = [
+            {
+                "course_code": c.course_code,
+                "course_name": c.course_name,
+                "teacher_name": c.teacher_name,
+                "weekday": c.weekday,
+                "start_section": c.start_section,
+                "end_section": c.end_section,
+                "classroom": c.classroom,
+                "semester": c.semester,
+            }
+            for c in courses
+        ]
+        self._send_json({"success": True, "data": data})
+
+
 
     def do_POST(self) -> None:
         handler = POST_ROUTES.get(self.path)
@@ -103,7 +143,7 @@ class SchedulingApiHandler(BaseHTTPRequestHandler):
 
 def run(host: str = "127.0.0.1", port: int = 8000) -> None:
     """Start the API server."""
-
+    init_db() 
     server = ThreadingHTTPServer((host, port), SchedulingApiHandler)
     print(f"Scheduling API running at http://{host}:{port}")
     server.serve_forever()
