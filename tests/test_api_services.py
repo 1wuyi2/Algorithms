@@ -130,6 +130,7 @@ class ApiServiceTests(unittest.TestCase):
         self.assertTrue(response["is_complete"])
         self.assertEqual(response["failed_course_ids"], [])
         self.assertEqual(response["failure_details"], [])
+        self.assertIn("pruned_branches", response)
 
     def test_run_backtracking_schedule_reports_failure_details(self):
         payload = {
@@ -167,6 +168,7 @@ class ApiServiceTests(unittest.TestCase):
         self.assertFalse(response["greedy"]["is_complete"])
         self.assertTrue(response["backtracking"]["is_complete"])
         self.assertIn("metrics", response["greedy"])
+        self.assertIn("pruned_branches", response["backtracking"])
 
     def test_evaluate_schedule_payload(self):
         payload = {
