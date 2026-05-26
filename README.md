@@ -489,6 +489,7 @@ GET http://127.0.0.1:8000/health
 - 前端当前保留老师端和学生端静态原型，主要用于后续联调展示。
 - 数据导入等 PDF 准备好后再做。
 - AI 辅助排课当前是规则化分析，不调用外部大模型。
+
 ## 数据导入模块使用指南
 
 本节详细说明如何使用任务二实现的数据导入功能。
@@ -499,6 +500,18 @@ GET http://127.0.0.1:8000/health
 
 ```bash
 pip install -r requirements.txt
+```
+
+`requirements.txt` 中应包含以下包：
+
+```
+sqlalchemy>=2.0.0
+pandas>=2.0.0
+pdfplumber>=0.10.0
+openpyxl>=3.0.0
+tqdm>=4.65.0
+```
+
 ### 数据导入步骤
 
 1. **准备选课手册 PDF 文件**，将文件放在本地任意目录（例如 `./选课手册/` 或 `~/Documents/`）。
@@ -514,3 +527,83 @@ pip install -r requirements.txt
 
    # 示例：导入第二学期
    python scripts/import_catalog.py --file "./选课手册/2025-2026学年第二学期选课手册.pdf" --semester "2025-2026-2"
+   ```
+
+   脚本会自动：
+   - 跳过前 11 页非课程内容
+   - 解析表格并清洗数据
+   - 将课程存入 `courses` 表，教师和教室去重存入 `teachers` 和 `classrooms` 表
+   - 打印导入汇总信息（课程数、教师数、教室数）
+
+3. **添加新学期数据**：更换 `--file` 和 `--semester` 参数再次运行即可，已存在的教师和教室会被自动跳过，课程通过 `(course_code, semester)` 唯一约束避免重复。
+
+### 验证数据导入是否成功
+
+导入完成后，可以通过以下两种方式验证数据是否正确写入数据库。
+
+#### 方法一：运行数据库检查脚本（推荐）
+
+在 `tests/` 目录下创建检查脚本 `test_db.py`：
+
+在**项目根目录**（`Algorithms/`）执行：
+
+```bash
+python tests/test_db.py
+```
+
+预期输出（实际数量可能略有差异）：
+```
+第一学期课程数: 1511
+第二学期课程数: 1425
+样例课程: 0001 泥人张百年技艺传承与经营实践 教师:张宇
+```
+
+#### 方法二：通过 API 验证
+
+1. 启动后端服务器（在项目根目录）：
+   ```bash
+   python -m src.api.server
+   ```
+
+2. 在浏览器中访问健康检查接口：
+   ```
+   http://127.0.0.1:8000/health
+   ```
+   应返回 `{"success": true, "data": {"status": "ok"}}`。
+
+3. 访问课程列表接口：
+   ```
+   http://127.0.0.1:8000/courses?semester=2025-2026-1
+   ```
+   应返回 JSON 格式的课程数据（默认最多 500 条）。
+
+如果以上检查均通过，说明数据导入模块工作正常。
+
+### 与其他模块集成
+
+- **排课算法（任务一）**：通过 `src/database/loader.load_courses_for_semester(semester)`（需自行实现或使用示例）从数据库读取课程，排课结果调用 `src/persistence/saver.save_schedule_assignments(assignments, semester)` 保存。
+- **老师端/学生端前端（任务三/四）**：通过 `GET /courses` 接口获取数据。
+- **教务系统对接（任务五）**：复用 `importer` 模块中的解析和清洗逻辑，数据源改为教务 API。
+
+### 常见问题
+
+- **导入时报唯一约束错误**：说明该学期数据已部分存在，请先运行清理脚本删除该学期课程，再重新导入。
+  ```python
+  # clean_semester.py
+  from src.database.session import init_db, get_session
+  from src.database.models import CourseDB
+  init_db()
+  session = get_session()
+  session.query(CourseDB).filter(CourseDB.semester == "2025-2026-2").delete()
+  session.commit()
+  ```
+
+- **API 返回 404**：确认 `src/api/server.py` 中已添加 `/courses` 路由，并重启服务器。
+
+- **数据库文件 `timetable.db` 提交到 Git？**  
+  已加入 `.gitignore`，请勿提交。每位成员需要自己运行导入脚本生成数据库。
+
+- **如何调整导入的课程数量限制？**  
+  修改 `scripts/import_catalog.py` 中的解析逻辑或自行添加 `--limit` 参数。
+```
+
