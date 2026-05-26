@@ -1,7 +1,6 @@
 """Minimal HTTP API server for the scheduling project.
 
 Run from the repository root with:
-
     python -m src.api.server
 """
 
@@ -22,9 +21,7 @@ from .services import (
     run_greedy_schedule,
 )
 
-
 JsonHandler = Callable[[Mapping[str, Any]], dict[str, object]]
-
 
 POST_ROUTES: dict[str, JsonHandler] = {
     "/schedule/greedy": run_greedy_schedule,
@@ -75,13 +72,11 @@ class SchedulingApiHandler(BaseHTTPRequestHandler):
         length = int(self.headers.get("Content-Length", "0"))
         if length == 0:
             return {}
-
         raw_body = self.rfile.read(length)
         try:
             payload = json.loads(raw_body.decode("utf-8"))
         except json.JSONDecodeError as exc:
             raise ApiError("INVALID_JSON", "Request body must be valid JSON", status=400) from exc
-
         if not isinstance(payload, Mapping):
             raise ValueError("Request JSON body must be an object")
         return payload
