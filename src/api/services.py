@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any, Mapping
 
 from src.algorithms import backtracking_schedule, greedy_color_schedule
-from src.assistant import analyze_schedule
+from src.assistant import AIScheduleAssistant, analyze_schedule
 from src.evaluation import evaluate_schedule
 from src.recommendation import build_fixed_schedule_items, recommend_courses
 
@@ -294,6 +294,92 @@ def analyze_schedule_payload(payload: Mapping[str, Any]) -> dict[str, object]:
         )
     )
     return success_payload(data)
+
+
+def ai_analyze_schedule_payload(payload: Mapping[str, Any]) -> dict[str, object]:
+    """Generate schedule analysis with optional external-LLM wording."""
+
+    courses = parse_courses(payload.get("courses"))
+    time_slots = parse_time_slots(payload.get("time_slots") or payload.get("timeSlots"))
+    assignments = parse_assignments(payload.get("assignments"))
+    rooms = parse_rooms(payload.get("rooms"))
+    use_llm = _optional_bool(
+        payload.get("use_llm") if "use_llm" in payload else payload.get("useLlm"),
+        default=True,
+    )
+
+    assistant = AIScheduleAssistant()
+    insight = assistant.analyze_schedule(
+        courses,
+        time_slots,
+        assignments=assignments,
+        rooms=rooms,
+        use_llm=use_llm,
+    )
+    data = {
+        "risk_level": insight.risk_level.value,
+        "summary": insight.summary,
+        "metrics": dict(insight.metrics),
+        "suggestions": [
+            {
+                "priority": suggestion.priority.value,
+                "title": suggestion.title,
+                "detail": suggestion.detail,
+                "related_ids": list(suggestion.related_ids),
+            }
+            for suggestion in insight.suggestions
+        ],
+        "llm_enabled": insight.llm_enabled,
+    }
+    if insight.llm_summary:
+        data["llm_summary"] = insight.llm_summary
+    if insight.llm_suggestions:
+        data["llm_suggestions"] = insight.llm_suggestions
+    return success_payload(data)
+
+
+def ai_answer_question_payload(payload: Mapping[str, Any]) -> dict[str, object]:
+    """Answer a scheduling-related question."""
+
+    question = str(payload.get("question") or "").strip()
+    if not question:
+        raise ValueError("Question is required")
+
+    context = payload.get("context")
+    if context is not None and not isinstance(context, Mapping):
+        raise ValueError("Expected context to be an object")
+
+    answer = AIScheduleAssistant().answer_question(question, context=context)
+    return success_payload(
+        {
+            "question": answer.question,
+            "answer": answer.answer,
+            "confidence": answer.confidence,
+            "source": answer.source,
+        }
+    )
+
+
+def ai_explain_schedule_payload(payload: Mapping[str, Any]) -> dict[str, object]:
+    """Explain a schedule evaluation result in natural language."""
+
+    courses = parse_courses(payload.get("courses"))
+    assignments = parse_assignments(payload.get("assignments"))
+    rooms = parse_rooms(payload.get("rooms"))
+    time_slots = parse_time_slots(payload.get("time_slots") or payload.get("timeSlots"))
+
+    evaluation = _evaluate_schedule_with_time_slots(courses, assignments, rooms=rooms, time_slots=time_slots)
+    explanation = AIScheduleAssistant().explain_schedule(evaluation, dict(getattr(evaluation, "metrics", {})))
+    return success_payload(
+        {
+            "explanation": explanation,
+            "score": evaluation.score,
+            "is_feasible": evaluation.is_feasible,
+            "error_count": len(evaluation.errors),
+            "warning_count": len(evaluation.warnings),
+            "metrics": dict(getattr(evaluation, "metrics", {})),
+        }
+    )
 
 
 def recommend_courses_payload(payload: Mapping[str, Any]) -> dict[str, object]:

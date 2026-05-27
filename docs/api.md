@@ -234,3 +234,65 @@ http://127.0.0.1:8000
 - `summary`：分析摘要
 - `metrics`：结构化指标
 - `suggestions`：优化建议
+
+## POST /assistant/ai-analyze
+
+生成带自然语言增强能力的排课分析。默认会尝试使用环境变量中的外部大模型配置；如果没有配置 `LLM_API_KEY`，接口会自动退回规则化分析，不影响运行。
+
+可选环境变量：
+
+```text
+LLM_PROVIDER=openai|doubao|qianwen|zhipu
+LLM_API_KEY=你的API Key
+LLM_BASE_URL=可选自定义接口地址
+LLM_MODEL=可选模型名称
+```
+
+请求参数与 `/assistant/analyze` 类似，可额外传入：
+
+```json
+{
+  "use_llm": false
+}
+```
+
+响应会包含：
+
+- `risk_level`：风险等级
+- `summary`：规则化摘要
+- `suggestions`：结构化建议
+- `llm_enabled`：本次是否真的启用了外部大模型
+- `llm_summary`：大模型生成的自然语言摘要，只有启用并调用成功时返回
+- `llm_suggestions`：大模型生成的自然语言建议，只有启用并调用成功时返回
+
+## POST /assistant/ask
+
+AI 排课问答接口。没有外部大模型配置时，会优先使用内置规则回答常见问题。
+
+请求示例：
+
+```json
+{
+  "question": "什么是回溯搜索算法？"
+}
+```
+
+响应字段：
+
+- `question`：原问题
+- `answer`：回答内容
+- `confidence`：置信度
+- `source`：`rule_based` 或 `llm`
+
+## POST /assistant/explain
+
+对课表评价结果进行自然语言解释。请求参数与 `/schedule/evaluate` 类似。
+
+响应字段：
+
+- `explanation`：自然语言解释
+- `score`：课表评分
+- `is_feasible`：是否可行
+- `error_count`：错误数量
+- `warning_count`：警告数量
+- `metrics`：评价指标

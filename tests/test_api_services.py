@@ -3,6 +3,9 @@
 import unittest
 
 from src.api import (
+    ai_analyze_schedule_payload,
+    ai_answer_question_payload,
+    ai_explain_schedule_payload,
     analyze_schedule_payload,
     authenticate_user_payload,
     compare_schedule_algorithms,
@@ -231,6 +234,52 @@ class ApiServiceTests(unittest.TestCase):
         self.assertIn(response["risk_level"], {"low", "medium", "high"})
         self.assertIn("metrics", response)
         self.assertTrue(response["suggestions"])
+
+    def test_ai_analyze_schedule_payload_works_without_llm_key(self):
+        payload = {
+            "courses": [
+                course("C001", "T001", ("G001",)),
+                course("C002", "T001", ("G002",)),
+            ],
+            "time_slots": [
+                time_slot("D1-S1", 1),
+                time_slot("D1-S2", 2),
+            ],
+            "use_llm": False,
+        }
+
+        response = ai_analyze_schedule_payload(payload)
+
+        self.assertTrue(response["success"])
+        self.assertFalse(response["llm_enabled"])
+        self.assertIn(response["risk_level"], {"low", "medium", "high"})
+        self.assertTrue(response["suggestions"])
+
+    def test_ai_answer_question_payload_uses_rule_based_answer(self):
+        response = ai_answer_question_payload({"question": "什么是回溯搜索算法？"})
+
+        self.assertTrue(response["success"])
+        self.assertEqual(response["source"], "rule_based")
+        self.assertIn("回溯", response["answer"])
+
+    def test_ai_explain_schedule_payload_returns_explanation(self):
+        payload = {
+            "courses": (
+                course("C001", "T001", ("G001",)),
+            ),
+            "assignments": (
+                {"course_id": "C001", "time_slot_id": "D1-S1"},
+            ),
+            "time_slots": (
+                time_slot("D1-S1", 1),
+            ),
+        }
+
+        response = ai_explain_schedule_payload(payload)
+
+        self.assertTrue(response["success"])
+        self.assertIn("explanation", response)
+        self.assertEqual(response["score"], 100)
 
     def test_rejects_missing_required_fields(self):
         with self.assertRaises(ValueError):

@@ -8,11 +8,17 @@ Run from the repository root with:
 from __future__ import annotations
 
 import json
+import mimetypes
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from typing import Any, Callable, Mapping
+from urllib.parse import unquote, urlparse
 
 from .errors import ApiError, error_payload
 from .services import (
+    ai_analyze_schedule_payload,
+    ai_answer_question_payload,
+    ai_explain_schedule_payload,
     analyze_schedule_payload,
     authenticate_user_payload,
     compare_schedule_algorithms,
@@ -23,15 +29,12 @@ from .services import (
     run_greedy_schedule,
 )
 
-# 新增导入
-from src.database.session import init_db, get_session
-from src.database.models import CourseDB, TeacherDB, ClassroomDB
-from src.importer.parser import parse_catalog_file
-from src.importer.cleaner import clean_course_data
-from src.importer.validator import validate_all
-import os
+from src.database.models import CourseDB
+from src.database.session import get_session, init_db
 
 JsonHandler = Callable[[Mapping[str, Any]], dict[str, object]]
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+WEB_ROOT = PROJECT_ROOT / "web"
 
 POST_ROUTES: dict[str, JsonHandler] = {
     "/auth/login": authenticate_user_payload,
@@ -40,6 +43,9 @@ POST_ROUTES: dict[str, JsonHandler] = {
     "/schedule/compare": compare_schedule_algorithms,
     "/schedule/evaluate": evaluate_schedule_payload,
     "/assistant/analyze": analyze_schedule_payload,
+    "/assistant/ai-analyze": ai_analyze_schedule_payload,
+    "/assistant/ask": ai_answer_question_payload,
+    "/assistant/explain": ai_explain_schedule_payload,
     "/student/recommend": recommend_courses_payload,
 }
 
@@ -53,17 +59,29 @@ class SchedulingApiHandler(BaseHTTPRequestHandler):
         self._send_json({}, status=204)
 
     def do_GET(self) -> None:
-        if self.path == "/health":
+        parsed = urlparse(self.path)
+        request_path = parsed.path
+
+        if request_path == "/health":
             self._send_json(health_response())
             return
-        # 新增课程列表查询
-        if self.path.startswith("/courses"):
+
+        if request_path.startswith("/courses"):
             self._handle_get_courses()
             return
+
+        if request_path == "/":
+            self._redirect("/login/index.html")
+            return
+
+        if self._handle_static_file(request_path):
+            return
+
         self._send_json(error_payload("NOT_FOUND", "Not found"), status=404)
 
     def _handle_get_courses(self) -> None:
-        from urllib.parse import parse_qs, urlparse
+        from urllib.parse import parse_qs
+
         session = get_session()
         parsed = urlparse(self.path)
         params = parse_qs(parsed.query)
@@ -86,6 +104,41 @@ class SchedulingApiHandler(BaseHTTPRequestHandler):
             for c in courses
         ]
         self._send_json({"success": True, "data": data})
+
+    def _handle_static_file(self, request_path: str) -> bool:
+        relative_path = unquote(request_path.lstrip("/"))
+        if not relative_path:
+            return False
+
+        file_path = (WEB_ROOT / relative_path).resolve()
+        try:
+            file_path.relative_to(WEB_ROOT.resolve())
+        except ValueError:
+            return False
+
+        if file_path.is_dir():
+            file_path = file_path / "index.html"
+
+        if not file_path.is_file():
+            return False
+
+        content_type = mimetypes.guess_type(file_path.name)[0] or "application/octet-stream"
+        if content_type.startswith("text/") or content_type == "application/javascript":
+            content_type += "; charset=utf-8"
+
+        body = file_path.read_bytes()
+        self.send_response(200)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+        return True
+
+    def _redirect(self, location: str) -> None:
+        self.send_response(302)
+        self.send_header("Location", location)
+        self.send_header("Content-Length", "0")
+        self.end_headers()
 
 
 
@@ -143,9 +196,9 @@ class SchedulingApiHandler(BaseHTTPRequestHandler):
 
 def run(host: str = "127.0.0.1", port: int = 8000) -> None:
     """Start the API server."""
-    init_db() 
+    init_db()
     server = ThreadingHTTPServer((host, port), SchedulingApiHandler)
-    print(f"Scheduling API running at http://{host}:{port}")
+    print(f"Scheduling website running at http://{host}:{port}")
     server.serve_forever()
 
 
