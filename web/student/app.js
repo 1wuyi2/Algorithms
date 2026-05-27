@@ -16,6 +16,14 @@ const majorLabels = {
   Mathematics: "数学",
   "Chinese Literature": "汉语言文学",
 };
+const courseCategories = ["专业必修", "专业选修", "通识必修", "通识选修"];
+const categoryAliases = {
+  专业核心: "专业必修",
+  高阶选修: "专业选修",
+  公共必修: "通识必修",
+  学科基础: "专业必修",
+  后端课程: "专业选修",
+};
 const weekdays = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"];
 const sectionTimeLabels = {
   1: "08:00-08:45",
@@ -75,7 +83,7 @@ const sampleCourses = [
     interestTags: ["database", "system"],
     prerequisiteCourseIds: ["C001"],
     timeSlotId: "D1-S4-5",
-    category: "专业核心",
+    category: "专业必修",
     credit: 3,
     teacherName: "赵老师",
     classroom: "津南公教 C305",
@@ -91,7 +99,7 @@ const sampleCourses = [
     interestTags: ["AI", "machine learning"],
     prerequisiteCourseIds: ["C099"],
     timeSlotId: "D2-S2-3",
-    category: "高阶选修",
+    category: "专业选修",
     credit: 2,
     teacherName: "陈老师",
     classroom: "津南公教 D210",
@@ -122,7 +130,7 @@ const sampleCourses = [
     interestTags: ["network", "system"],
     prerequisiteCourseIds: ["C001"],
     timeSlotId: "D3-S5-6",
-    category: "专业核心",
+    category: "专业必修",
     credit: 3,
     teacherName: "孙老师",
     classroom: "津南公教 A308",
@@ -139,7 +147,7 @@ const sampleAssignments = [
     timeSlotId: "D1-S1-2",
     teacherName: "李老师",
     classroom: "津南公教 A103",
-    courseType: "公共必修",
+    courseType: "通识必修",
     weekday: 1,
     startSection: 1,
     endSection: 2,
@@ -150,7 +158,7 @@ const sampleAssignments = [
     timeSlotId: "D3-S2-3",
     teacherName: "孙老师",
     classroom: "津南公教 B204",
-    courseType: "学科基础",
+    courseType: "专业必修",
     weekday: 3,
     startSection: 2,
     endSection: 3,
@@ -161,6 +169,7 @@ let state = loadState();
 let recommendations = [];
 let selectedScheduleMode = "week";
 let activeStudentView = "profile";
+let selectionFeedback = null;
 
 const elements = {
   appShell: document.querySelector(".app-shell"),
@@ -177,6 +186,7 @@ const elements = {
   studentInterestSummary: document.querySelector("#studentInterestSummary"),
   strategySummary: document.querySelector("#strategySummary"),
   dataSourceLabel: document.querySelector("#dataSourceLabel"),
+  selectionStatus: document.querySelector("#selectionStatus"),
   profileStatus: document.querySelector("#profileStatus"),
   form: document.querySelector("#recommendForm"),
   recommendButton: document.querySelector("#recommendButton"),
@@ -270,9 +280,12 @@ document.body.addEventListener("click", (event) => {
   if (action === "complete") toggleSet(state.completedCourseIds, courseId);
   if (action === "fixed") toggleSet(state.fixedCourseIds, courseId);
   if (action === "recommend-one") recommendOne(courseId);
+  if (action === "select-course") selectRecommendedCourse(courseId);
+  if (action === "drop-course") dropSelectedCourse(courseId);
   recommendations = recommendations.map((item) => ({
     ...item,
     is_completed: state.completedCourseIds.includes(item.course_id),
+    is_currently_selected: isCourseSelected(item.course_id),
     is_fixed_selected: state.fixedCourseIds.includes(item.course_id),
   }));
   persistAndRender();
@@ -353,6 +366,119 @@ function recommendOne(courseId) {
   setStatus(`已把 ${course.name} 加入推荐预览。`);
 }
 
+function selectRecommendedCourse(courseId) {
+  const course = findCourse(courseId) || courseFromRecommendation(courseId);
+  if (!course) {
+    setSelectionStatus("未找到课程详情，暂时不能选课。", "danger", courseId);
+    return;
+  }
+
+  const validation = validateCourseSelection(course);
+  if (!validation.ok) {
+    setSelectionStatus(validation.reason, "danger", course.id);
+    return;
+  }
+
+  state.currentAssignments.push({
+    courseId: course.id,
+    courseName: course.name,
+    timeSlotId: course.timeSlotId,
+    teacherName: course.teacherName,
+    classroom: course.classroom,
+    courseType: normalizeCourseCategory(course.category || course.courseType, course.name),
+    weekday: course.weekday,
+    startSection: course.startSection,
+    endSection: course.endSection,
+    selectedByStudent: true,
+  });
+  recommendations = recommendations.map((item) => item.course_id === course.id
+    ? { ...item, is_currently_selected: true }
+    : item);
+  setSelectionStatus(`已选择 ${course.name}，课程已加入“我的课表”。`, "success", course.id);
+}
+
+function dropSelectedCourse(courseId) {
+  const selected = state.currentAssignments.find((item) => item.courseId === courseId && item.selectedByStudent);
+  if (!selected) {
+    setSelectionStatus("该课程不是通过推荐选入的课程，不能在这里退课。", "danger", courseId);
+    return;
+  }
+  state.currentAssignments = state.currentAssignments.filter((item) => !(item.courseId === courseId && item.selectedByStudent));
+  recommendations = recommendations.map((item) => item.course_id === courseId
+    ? {
+        ...item,
+        is_currently_selected: false,
+        has_time_conflict: hasTimeConflict(recommendationToCourse(item), busyItemsForCourse(courseId)),
+      }
+    : item);
+  setSelectionStatus(`已退选 ${selected.courseName}，课程已从“我的课表”移除。`, "success", courseId);
+}
+
+function validateCourseSelection(course) {
+  if (state.completedCourseIds.includes(course.id)) {
+    return { ok: false, reason: `${course.name} 已标记为已修课程，不能重复选课。` };
+  }
+  if (isCourseSelected(course.id)) {
+    return { ok: false, reason: `${course.name} 已经在当前课表中，不能重复选课。` };
+  }
+  if (state.fixedCourseIds.includes(course.id)) {
+    return { ok: false, reason: `${course.name} 已经是固定必选课程，不需要再次选课。` };
+  }
+
+  const selectedConflict = findConflict(course, state.currentAssignments);
+  if (selectedConflict) {
+    return {
+      ok: false,
+      reason: `${course.name} 与已选课程 ${selectedConflict.courseName || selectedConflict.name || selectedConflict.courseId} 在 ${formatCourseTime(course)} 冲突，不能选课。`,
+    };
+  }
+
+  const fixedCourses = state.fixedCourseIds.map(findCourse).filter(Boolean);
+  const fixedConflict = findConflict(course, fixedCourses);
+  if (fixedConflict) {
+    return {
+      ok: false,
+      reason: `${course.name} 与固定必选课程 ${fixedConflict.name || fixedConflict.courseName || fixedConflict.id} 在 ${formatCourseTime(course)} 冲突，不能选课。`,
+    };
+  }
+
+  if (!course.weekday || !course.startSection || !course.endSection) {
+    return { ok: false, reason: `${course.name} 暂无明确上课时间，不能直接选课。` };
+  }
+  return { ok: true };
+}
+
+function findConflict(course, items) {
+  return items.find((item) => {
+    if (item.id === course.id || item.courseId === course.id || item.course_id === course.id) return false;
+    const left = blockFrom(course);
+    const right = blockFrom(item);
+    return left && right && blocksOverlap(left, right);
+  });
+}
+
+function courseFromRecommendation(courseId) {
+  const item = recommendations.find((entry) => entry.course_id === courseId);
+  if (!item) return null;
+  return recommendationToCourse(item);
+}
+
+function recommendationToCourse(item) {
+  return {
+    id: item.course_id,
+    name: item.course_name,
+    timeSlotId: item.time_slot_id,
+    category: normalizeCourseCategory(item.course_type || item.category, item.course_name),
+    courseType: normalizeCourseCategory(item.course_type || item.category, item.course_name),
+    credit: item.credit,
+    teacherName: item.teacher_name,
+    classroom: item.classroom,
+    weekday: item.weekday,
+    startSection: item.start_section,
+    endSection: item.end_section,
+  };
+}
+
 function buildRecommendationPayload() {
   return {
     student: {
@@ -363,13 +489,21 @@ function buildRecommendationPayload() {
       interests: state.profile.interests,
       fixedCourseIds: state.fixedCourseIds,
     },
-    courses: state.courses,
+    courses: normalizedCourses(),
     currentAssignments: state.currentAssignments,
     topK: state.settings.topK,
     includeConflicted: state.settings.includeConflicted,
     excludeSelected: state.settings.excludeSelected,
     fixedCourseIds: state.fixedCourseIds,
   };
+}
+
+function normalizedCourses() {
+  return state.courses.map((course) => ({
+    ...course,
+    category: normalizeCourseCategory(course.category || course.courseType, course.name),
+    courseType: normalizeCourseCategory(course.courseType || course.category, course.name),
+  }));
 }
 
 function hydrateForm() {
@@ -429,15 +563,14 @@ function renderMetrics() {
   elements.fixedCount.textContent = state.fixedCourseIds.length;
   elements.recommendLimit.textContent = state.settings.topK;
   elements.recommendationMetric.textContent = recommendations.length;
-  elements.conflictMetric.textContent = recommendations.filter((item) => item.has_time_conflict).length;
+  elements.conflictMetric.textContent = recommendations.filter((item) => item.has_time_conflict && !isCourseSelected(item.course_id)).length;
 }
 
 function renderCategoryFilter() {
-  const categories = Array.from(new Set(state.courses.map((course) => course.category || course.courseType).filter(Boolean))).sort();
   const current = elements.categoryFilter.value;
   elements.categoryFilter.innerHTML = '<option value="">全部类型</option>' +
-    categories.map((category) => `<option value="${escapeHtml(category)}">${escapeHtml(category)}</option>`).join("");
-  if (categories.includes(current)) {
+    courseCategories.map((category) => `<option value="${escapeHtml(category)}">${escapeHtml(category)}</option>`).join("");
+  if (courseCategories.includes(current)) {
     elements.categoryFilter.value = current;
   }
 }
@@ -455,10 +588,12 @@ function renderCatalog() {
 function renderCourseCard(course) {
   const completed = state.completedCourseIds.includes(course.id);
   const fixed = state.fixedCourseIds.includes(course.id);
-  const conflicted = hasTimeConflict(course, state.currentAssignments);
+  const conflicted = hasTimeConflict(course, busyItemsForCourse(course.id));
+  const category = normalizeCourseCategory(course.category || course.courseType, course.name);
   const tags = [
     completed ? '<span class="badge success">已修</span>' : "",
     fixed ? '<span class="badge warning">固定</span>' : "",
+    isCourseSelected(course.id) ? '<span class="badge warning">已选</span>' : "",
     conflicted ? '<span class="badge danger">时间冲突</span>' : '<span class="badge success">时间可选</span>',
     ...(course.interestTags || []).slice(0, 3).map((tag) => `<span class="badge neutral">${escapeHtml(tag)}</span>`),
   ].filter(Boolean).join("");
@@ -467,7 +602,7 @@ function renderCourseCard(course) {
       <div>
         <strong>${escapeHtml(course.name)} (${escapeHtml(course.id)})</strong>
         <div class="course-meta">
-          <span>${escapeHtml(course.category || course.courseType || "课程")}</span>
+          <span>${escapeHtml(category)}</span>
           <span class="meta-dot">/</span>
           <span>${escapeHtml(course.credit ?? "-")} 学分</span>
           <span class="meta-dot">/</span>
@@ -583,20 +718,28 @@ function renderMonthTimetable(items) {
 
 function renderAssignmentTable(items) {
   if (!items.length) {
-    elements.assignmentTableBody.innerHTML = '<tr><td colspan="6">暂无课程</td></tr>';
+    elements.assignmentTableBody.innerHTML = '<tr><td colspan="7">暂无课程</td></tr>';
     return;
   }
   elements.assignmentTableBody.innerHTML = [...items]
     .sort((a, b) => Number(a.weekday) - Number(b.weekday) || Number(a.startSection) - Number(b.startSection) || a.courseName.localeCompare(b.courseName, "zh-CN"))
     .map((item) => `<tr>
       <td>${escapeHtml(`${item.courseName} (${item.courseId})`)}</td>
-      <td>${escapeHtml(item.courseType || "课程")}</td>
+      <td>${escapeHtml(normalizeCourseCategory(item.courseType, item.courseName))}</td>
       <td>${escapeHtml(formatCourseTime(item))}</td>
       <td>${escapeHtml(item.teacherName || "教师待定")}</td>
       <td>${escapeHtml(item.classroom || "教室待定")}</td>
       <td>${escapeHtml(item.source || "当前占用")}</td>
+      <td>${renderDropAction(item)}</td>
     </tr>`)
     .join("");
+}
+
+function renderDropAction(item) {
+  if (item.selectedByStudent) {
+    return `<button class="text-button danger" type="button" data-action="drop-course" data-course-id="${escapeHtml(item.courseId)}">退课</button>`;
+  }
+  return '<span class="muted-text">不可退</span>';
 }
 
 function getVisibleTimetableItems() {
@@ -615,7 +758,7 @@ function getVisibleTimetableItems() {
 }
 
 function buildTimetableItems() {
-  const current = state.currentAssignments.map((item) => normalizeTimetableItem(item, "当前占用"));
+  const current = state.currentAssignments.map((item) => normalizeTimetableItem(item, item.selectedByStudent ? "学生选课" : "当前占用"));
   const fixed = state.fixedCourseIds
     .map(findCourse)
     .filter(Boolean)
@@ -625,7 +768,7 @@ function buildTimetableItems() {
       timeSlotId: course.timeSlotId,
       teacherName: course.teacherName,
       classroom: course.classroom,
-      courseType: course.category || course.courseType,
+      courseType: normalizeCourseCategory(course.category || course.courseType, course.name),
       weekday: course.weekday,
       startSection: course.startSection,
       endSection: course.endSection,
@@ -644,11 +787,12 @@ function normalizeTimetableItem(item, source) {
     timeSlotId: item.timeSlotId || item.time_slot_id || parsed.id,
     teacherName: item.teacherName || item.teacher_name,
     classroom: item.classroom,
-    courseType: item.courseType || item.course_type || item.category,
+    courseType: normalizeCourseCategory(item.courseType || item.course_type || item.category, item.courseName || item.name),
     weekday,
     startSection,
     endSection,
     source,
+    selectedByStudent: Boolean(item.selectedByStudent),
   };
 }
 
@@ -696,13 +840,15 @@ function renderRecommendations(items) {
   }
 
   elements.recommendationList.innerHTML = items.map((item) => {
-    const conflict = Boolean(item.has_time_conflict);
+    const selected = isCourseSelected(item.course_id);
+    const conflict = Boolean(item.has_time_conflict) && !selected;
     const missing = item.missing_prerequisite_ids || [];
     const tags = item.matched_interest_tags || [];
-    const courseType = item.course_type || item.category || "课程";
+    const courseType = normalizeCourseCategory(item.course_type || item.category, item.course_name);
     const teacher = item.teacher_name || item.teacherName || "教师待定";
     const classroom = item.classroom || "教室待定";
     const credit = item.credit ?? "-";
+    const canSelect = !selected && !item.is_completed && !item.is_fixed_selected && !item.has_time_conflict;
     return `<article class="course-card">
       <div class="course-head">
         <div>
@@ -719,18 +865,31 @@ function renderRecommendations(items) {
             <span>${escapeHtml(classroom)}</span>
           </div>
         </div>
-        <div class="score" aria-label="推荐分数 ${escapeHtml(item.score)}">${escapeHtml(item.score)}</div>
+        <div class="recommend-actions">
+          <div class="score" aria-label="推荐分数 ${escapeHtml(item.score)}">${escapeHtml(item.score)}</div>
+          <button class="secondary-button select-button" type="button" data-action="select-course" data-course-id="${escapeHtml(item.course_id)}">${selected ? "已选" : "选课"}</button>
+        </div>
       </div>
       <div class="tag-row">
-        <span class="badge ${conflict ? "danger" : "success"}">${conflict ? "时间冲突" : "时间可选"}</span>
+        <span class="badge ${selected ? "success" : conflict ? "danger" : "success"}">${selected ? "已加入课表" : conflict ? "时间冲突" : "时间可选"}</span>
         ${item.is_completed ? '<span class="badge warning">已修</span>' : ""}
+        ${selected ? '<span class="badge success">已选</span>' : ""}
         ${item.is_fixed_selected ? '<span class="badge warning">固定</span>' : ""}
         ${tags.map((tag) => `<span class="badge neutral">${escapeHtml(tag)}</span>`).join("")}
         ${missing.length ? `<span class="badge warning">缺少先修：${escapeHtml(missing.join(", "))}</span>` : ""}
+        ${canSelect ? '<span class="badge success">可选课</span>' : ""}
       </div>
       <div class="course-reasons">${escapeHtml(summarizeRecommendation(item))}</div>
+      ${renderSelectionFeedback(item.course_id)}
     </article>`;
   }).join("");
+}
+
+function renderSelectionFeedback(courseId) {
+  if (!selectionFeedback || selectionFeedback.courseId !== courseId) {
+    return "";
+  }
+  return `<div class="selection-feedback ${escapeHtml(selectionFeedback.mode)}">${escapeHtml(selectionFeedback.message)}</div>`;
 }
 
 function getFilteredCourses() {
@@ -742,16 +901,15 @@ function getFilteredCourses() {
       course.id,
       course.name,
       course.teacherName,
-      course.category,
-      course.courseType,
+      normalizeCourseCategory(course.category || course.courseType, course.name),
       course.classroom,
       ...(course.interestTags || []),
     ].join(" ").toLowerCase();
     if (keyword && !haystack.includes(keyword)) return false;
-    if (category && (course.category || course.courseType) !== category) return false;
+    if (category && normalizeCourseCategory(course.category || course.courseType, course.name) !== category) return false;
     if (status === "completed" && !state.completedCourseIds.includes(course.id)) return false;
     if (status === "fixed" && !state.fixedCourseIds.includes(course.id)) return false;
-    if (status === "conflict" && !hasTimeConflict(course, state.currentAssignments)) return false;
+    if (status === "conflict" && !hasTimeConflict(course, busyItemsForCourse(course.id))) return false;
     if (status === "available" && (state.completedCourseIds.includes(course.id) || state.fixedCourseIds.includes(course.id))) return false;
     return true;
   });
@@ -813,8 +971,8 @@ function localRecommend(payload) {
         missing_prerequisite_ids: missing,
         reasons,
         time_slot_id: course.timeSlotId,
-        category: course.category,
-        course_type: course.courseType || course.category,
+        category: normalizeCourseCategory(course.category || course.courseType, course.name),
+        course_type: normalizeCourseCategory(course.courseType || course.category, course.name),
         credit: course.credit,
         teacher_name: course.teacherName,
         classroom: course.classroom,
@@ -840,7 +998,11 @@ function summarizeRecommendation(item) {
   if ((item.missing_prerequisite_ids || []).length) {
     parts.push(`需要补足先修课程 ${item.missing_prerequisite_ids.join(", ")}`);
   }
-  parts.push(item.has_time_conflict ? "当前已有同时间段课程" : "与当前占用不冲突");
+  if (isCourseSelected(item.course_id)) {
+    parts.push("该课程已加入当前课表");
+  } else {
+    parts.push(item.has_time_conflict ? "当前已有同时间段课程" : "与当前占用不冲突");
+  }
   if (item.reasons) {
     parts.push(...item.reasons.slice(0, 2));
   }
@@ -870,7 +1032,7 @@ function mapBackendCourse(row) {
     interestTags: inferInterestTags(name),
     prerequisiteCourseIds: [],
     timeSlotId: weekday && startSection ? `D${weekday}-S${startSection}-${endSection}` : undefined,
-    category: "后端课程",
+    category: inferCourseCategory(row.category || row.course_type || row.courseType, name),
     credit: undefined,
     teacherName: row.teacher_name || row.teacherName || "教师待定",
     classroom: row.classroom || "教室待定",
@@ -965,6 +1127,43 @@ function setLoading(isLoading) {
 
 function setStatus(message) {
   elements.recommendStatus.textContent = message;
+}
+
+function setSelectionStatus(message, mode = "neutral", courseId = null) {
+  selectionFeedback = courseId ? { courseId, message, mode } : null;
+  elements.selectionStatus.textContent = message;
+  elements.selectionStatus.className = `result-strip ${mode}`;
+}
+
+function isCourseSelected(courseId) {
+  return state.currentAssignments.some((item) => item.courseId === courseId || item.course_id === courseId);
+}
+
+function busyItemsForCourse(courseId) {
+  return [
+    ...state.currentAssignments,
+    ...state.fixedCourseIds
+      .filter((id) => id !== courseId)
+      .map(findCourse)
+      .filter(Boolean),
+  ];
+}
+
+function normalizeCourseCategory(value, courseName = "") {
+  const raw = String(value || "").trim();
+  if (courseCategories.includes(raw)) return raw;
+  if (categoryAliases[raw]) return categoryAliases[raw];
+  return inferCourseCategory(raw, courseName);
+}
+
+function inferCourseCategory(value, courseName = "") {
+  const text = `${value || ""} ${courseName || ""}`;
+  if (text.includes("通识") && text.includes("必修")) return "通识必修";
+  if (text.includes("通识")) return "通识选修";
+  if (text.includes("公共") || text.includes("英语") || text.includes("体育") || text.includes("思政")) return "通识必修";
+  if (text.includes("必修") || text.includes("核心") || text.includes("基础")) return "专业必修";
+  if (text.includes("选修") || text.includes("高阶")) return "专业选修";
+  return "专业选修";
 }
 
 function showStudentView(viewName, options = {}) {
