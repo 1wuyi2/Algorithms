@@ -174,6 +174,7 @@ let selectionFeedback = null;
 const elements = {
   appShell: document.querySelector(".app-shell"),
   navTabs: document.querySelectorAll(".nav-tab"),
+  metricCards: document.querySelectorAll("[data-metric-view]"),
   studentViews: document.querySelectorAll("[data-student-view]"),
   studentGrid: document.querySelector(".student-grid"),
   identity: document.querySelector("#studentIdentity"),
@@ -271,6 +272,9 @@ elements.scheduleModeControl.addEventListener("click", (event) => {
 });
 elements.navTabs.forEach((tab) => {
   tab.addEventListener("click", () => showStudentView(tab.dataset.view || "profile"));
+});
+elements.metricCards.forEach((card) => {
+  card.addEventListener("click", () => showStudentView(card.dataset.metricView || "profile"));
 });
 
 document.body.addEventListener("click", (event) => {
@@ -588,12 +592,18 @@ function renderCatalog() {
 function renderCourseCard(course) {
   const completed = state.completedCourseIds.includes(course.id);
   const fixed = state.fixedCourseIds.includes(course.id);
+  const selected = isCourseSelected(course.id);
   const conflicted = hasTimeConflict(course, busyItemsForCourse(course.id));
   const category = normalizeCourseCategory(course.category || course.courseType, course.name);
+  const selectionAction = completed || fixed
+    ? ""
+    : selected
+      ? `<button class="text-button danger" type="button" data-action="drop-course" data-course-id="${escapeHtml(course.id)}">退课</button>`
+      : `<button class="text-button" type="button" data-action="select-course" data-course-id="${escapeHtml(course.id)}">选课</button>`;
   const tags = [
     completed ? '<span class="badge success">已修</span>' : "",
     fixed ? '<span class="badge warning">固定</span>' : "",
-    isCourseSelected(course.id) ? '<span class="badge warning">已选</span>' : "",
+    selected ? '<span class="badge warning">已选</span>' : "",
     conflicted ? '<span class="badge danger">时间冲突</span>' : '<span class="badge success">时间可选</span>',
     ...(course.interestTags || []).slice(0, 3).map((tag) => `<span class="badge neutral">${escapeHtml(tag)}</span>`),
   ].filter(Boolean).join("");
@@ -616,11 +626,13 @@ function renderCourseCard(course) {
       <div class="row-actions">
         <button class="text-button" type="button" data-action="complete" data-course-id="${escapeHtml(course.id)}">${completed ? "取消已修" : "标记已修"}</button>
         <button class="text-button" type="button" data-action="fixed" data-course-id="${escapeHtml(course.id)}">${fixed ? "取消固定" : "设为固定"}</button>
+        ${selectionAction}
         <button class="text-button" type="button" data-action="recommend-one" data-course-id="${escapeHtml(course.id)}">预览</button>
       </div>
     </div>
     <div class="tag-row">${tags}</div>
     <div class="course-reasons">${escapeHtml(courseSummary(course))}</div>
+    ${renderSelectionFeedback(course.id)}
   </article>`;
 }
 
@@ -849,6 +861,11 @@ function renderRecommendations(items) {
     const classroom = item.classroom || "教室待定";
     const credit = item.credit ?? "-";
     const canSelect = !selected && !item.is_completed && !item.is_fixed_selected && !item.has_time_conflict;
+    const recommendationAction = item.is_completed || item.is_fixed_selected
+      ? ""
+      : selected
+        ? `<button class="text-button danger select-button" type="button" data-action="drop-course" data-course-id="${escapeHtml(item.course_id)}">退课</button>`
+        : `<button class="secondary-button select-button" type="button" data-action="select-course" data-course-id="${escapeHtml(item.course_id)}">选课</button>`;
     return `<article class="course-card">
       <div class="course-head">
         <div>
@@ -867,7 +884,7 @@ function renderRecommendations(items) {
         </div>
         <div class="recommend-actions">
           <div class="score" aria-label="推荐分数 ${escapeHtml(item.score)}">${escapeHtml(item.score)}</div>
-          <button class="secondary-button select-button" type="button" data-action="select-course" data-course-id="${escapeHtml(item.course_id)}">${selected ? "已选" : "选课"}</button>
+          ${recommendationAction}
         </div>
       </div>
       <div class="tag-row">
@@ -1171,6 +1188,7 @@ function showStudentView(viewName, options = {}) {
   elements.navTabs.forEach((tab) => {
     tab.classList.toggle("active", tab.dataset.view === activeStudentView);
   });
+  updateMetricCards();
   elements.studentViews.forEach((view) => {
     view.classList.toggle("active-student-view", view.dataset.studentView === activeStudentView);
     view.classList.toggle("student-view-hidden", view.dataset.studentView !== activeStudentView);
@@ -1182,6 +1200,13 @@ function showStudentView(viewName, options = {}) {
   if (activeStudentView === "schedule") {
     renderTimetable();
   }
+}
+
+function updateMetricCards() {
+  elements.metricCards.forEach((card) => {
+    const targetView = card.dataset.metricView;
+    card.classList.toggle("active", targetView === activeStudentView);
+  });
 }
 
 function defaultState() {
