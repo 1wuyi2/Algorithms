@@ -28,8 +28,6 @@
           <button class="nav-tab active" type="button" data-view="profile">个人主页</button>
           <button class="nav-tab" type="button" data-view="settings">推荐设置</button>
           <button class="nav-tab" type="button" data-view="catalog">课程库</button>
-          <button class="nav-tab" type="button" data-view="completed">已修课程</button>
-          <button class="nav-tab" type="button" data-view="fixed">固定课程</button>
           <button class="nav-tab" type="button" data-view="schedule">我的课表</button>
           <button class="nav-tab" type="button" data-view="recommendations">推荐结果</button>
         </nav>
@@ -48,30 +46,30 @@
         </header>
 
         <section class="metric-grid" aria-label="学习状态摘要">
-          <div class="metric">
+          <button class="metric" type="button" data-metric-view="completed">
             <span id="completedCount">0</span>
             <small>已修课程</small>
-          </div>
-          <div class="metric">
+          </button>
+          <button class="metric" type="button" data-metric-view="catalog">
             <span id="catalogCount">0</span>
             <small>课程库</small>
-          </div>
-          <div class="metric">
+          </button>
+          <button class="metric" type="button" data-metric-view="fixed">
             <span id="fixedCount">0</span>
             <small>固定课程</small>
-          </div>
-          <div class="metric">
+          </button>
+          <button class="metric" type="button" data-metric-view="settings">
             <span id="recommendLimit">4</span>
             <small>推荐上限</small>
-          </div>
-          <div class="metric">
+          </button>
+          <button class="metric" type="button" data-metric-view="recommendations">
             <span id="recommendationMetric">0</span>
             <small>推荐结果</small>
-          </div>
-          <div class="metric">
+          </button>
+          <button class="metric" type="button" data-metric-view="recommendations">
             <span id="conflictMetric">0</span>
             <small>冲突提示</small>
-          </div>
+          </button>
         </section>
 
         <section class="view active">
