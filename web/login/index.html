@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>南开大学学院级智能排课系统 - 登录</title>
+
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=Noto+Serif+SC:wght@600;700;900&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="login-page">
+      <section class="login-panel" aria-labelledby="loginTitle">
+        <div class="brand">
+          <div class="brand-mark">NK</div>
+          <div>
+            <p>南开大学</p>
+            <h1 id="loginTitle">智能排课系统</h1>
+          </div>
+        </div>
+
+        <form id="loginForm" class="login-form">
+          <label>
+            学工号
+            <input name="account" autocomplete="username" required placeholder="请输入学生或教师学工号" />
+          </label>
+          <label>
+            密码
+            <input name="password" type="password" autocomplete="current-password" required placeholder="请输入密码" />
+          </label>
+
+          <p id="loginMessage" class="message" aria-live="polite"></p>
+          <button type="submit">登录</button>
+        </form>
+      </section>
+    </main>
+
+    <script src="./app.js"></script>
+  </body>
+</html>
