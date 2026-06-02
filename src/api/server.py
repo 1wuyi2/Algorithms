@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import mimetypes
+import os
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Callable, Mapping
@@ -249,4 +250,4 @@ def run(host: str = "127.0.0.1", port: int = 8000) -> None:
 
 
 if __name__ == "__main__":
-    run()
+    run(host=os.getenv("HOST", "0.0.0.0"), port=int(os.getenv("PORT", "8000")))

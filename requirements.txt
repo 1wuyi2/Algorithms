@@ -2,3 +2,4 @@ sqlalchemy>=2.0.0
 pandas>=2.0.0
 pdfplumber>=0.10.0
 openpyxl>=3.0.0
+psycopg2-binary>=2.9.9
