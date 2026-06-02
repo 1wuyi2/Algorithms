@@ -8,6 +8,7 @@ not allocate rooms yet.
 
 from __future__ import annotations
 
+import sys
 from dataclasses import dataclass
 from typing import Dict, Iterable, Mapping, Optional, Tuple
 
@@ -71,6 +72,10 @@ def backtracking_schedule(
 
     course_list = tuple(courses)
     time_slot_list = tuple(time_slots)
+    required_recursion_limit = max(sys.getrecursionlimit(), len(course_list) + 500)
+    if required_recursion_limit > sys.getrecursionlimit():
+        sys.setrecursionlimit(required_recursion_limit)
+
     _ensure_unique_ids((course.id for course in course_list), "Course")
     _ensure_unique_ids((slot.id for slot in time_slot_list), "TimeSlot")
 
