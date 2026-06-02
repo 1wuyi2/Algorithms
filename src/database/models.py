@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Float, Text, DateTime, ForeignKey, UniqueConstraint
+from sqlalchemy import Column, Integer, String, Float, Text, DateTime, ForeignKey, UniqueConstraint, ForeignKeyConstraint
 from sqlalchemy.ext.declarative import declarative_base
 from datetime import datetime
 
@@ -62,9 +62,17 @@ class ScheduleResultDB(Base):
     """排课结果表 - 与任务一算法对接"""
     __tablename__ = "schedule_results"
     id = Column(Integer, primary_key=True, autoincrement=True)
-    course_code = Column(String(20), ForeignKey("courses.course_code"), nullable=False)
+    course_code = Column(String(20), nullable=False)
     teacher_id = Column(Integer, ForeignKey("teachers.id"))
     classroom_id = Column(Integer, ForeignKey("classrooms.id"))
     time_slot_id = Column(Integer, ForeignKey("time_slots.id"))
     semester = Column(String(20), nullable=False, index=True)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["course_code", "semester"],
+            ["courses.course_code", "courses.semester"],
+            name="_schedule_course_semester_fk",
+        ),
+    )
