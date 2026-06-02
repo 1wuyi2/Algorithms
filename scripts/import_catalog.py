@@ -41,13 +41,17 @@ def import_catalog(file_path: str, semester: str, db_url: str = "sqlite:///timet
     # 5. 插入课程表（使用 merge 避免重复）
     inserted_courses = 0
     for _, row in df_clean.iterrows():
+        # 处理教师姓名为空的情况：替换为默认值
+        teacher_name = row.get("teacher_name", "").strip()
+        if not teacher_name:
+            teacher_name = "未知教师"
         course = CourseDB(
             course_code=row["course_code"],
             course_name=row["course_name"],
             module=row.get("module"),
             quota=row.get("quota", 0),
             cross_major_quota=row.get("cross_major_quota", 0),
-            teacher_name=row.get("teacher_name", ""),
+            teacher_name=teacher_name,
             weekday=row.get("weekday"),
             start_section=row.get("start_section"),
             end_section=row.get("end_section"),
@@ -67,7 +71,11 @@ def import_catalog(file_path: str, semester: str, db_url: str = "sqlite:///timet
     # 6. 提取教师去重，并安全插入（避免唯一约束冲突）
     teacher_names = set()
     for _, row in df_clean.iterrows():
-        for t in row["teacher_name"].split(","):
+        # 同样处理空教师（避免空字符串被加入）
+        raw_name = row.get("teacher_name", "").strip()
+        if not raw_name:
+            raw_name = "未知教师"
+        for t in raw_name.split(","):
             if t.strip():
                 teacher_names.add(t.strip())
     

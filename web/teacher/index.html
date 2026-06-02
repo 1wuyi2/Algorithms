@@ -48,6 +48,18 @@
           </div>
         </header>
 
+        <!-- 全局数据加载工具栏 -->
+        <div class="data-toolbar" style="display: flex; gap: 12px; align-items: center; justify-content: flex-end; margin-bottom: 20px; background: #fff; padding: 10px 20px; border-radius: 20px; border: 1px solid #e2e8f0;">
+          <label style="display: flex; align-items: center; gap: 8px; font-weight: 600;">学期
+            <select id="semesterSelect" style="padding: 6px 12px; border-radius: 12px; border: 1px solid #cbd5e1;">
+              <option value="2025-2026-1">2025-2026 第一学期</option>
+              <option value="2025-2026-2">2025-2026 第二学期</option>
+            </select>
+          </label>
+          <button id="loadBackendDataBtn" class="secondary-button" type="button">从后端加载课程/教师/教室</button>
+          <span class="badge neutral" id="dataSourceBadge" style="margin-left: auto;">数据来源：本地示例</span>
+        </div>
+
         <section class="metric-grid" aria-label="数据概览">
           <button class="metric" type="button" data-overview-detail="courses"><span id="courseCount">0</span><small>课程</small></button>
           <button class="metric" type="button" data-overview-detail="teachers"><span id="teacherCount">0</span><small>教师</small></button>
@@ -215,6 +227,7 @@
               </div>
             </div>
             <div class="option-grid">
+              <label class="checkbox-row"><input id="freeRescheduleMode" type="checkbox" />重新自动排课（忽略导入时间）</label>
               <label class="checkbox-row"><input id="prioritizeFixedTime" type="checkbox" checked />优先固定时间</label>
               <label class="checkbox-row"><input id="sortByConflictDegree" type="checkbox" checked />按冲突度排序</label>
               <label class="checkbox-row"><input id="sortByCandidateCount" type="checkbox" />候选时间少者优先</label>

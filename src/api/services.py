@@ -8,7 +8,7 @@ from src.algorithms import backtracking_schedule, greedy_color_schedule
 from src.assistant import AIScheduleAssistant, analyze_schedule
 from src.evaluation import evaluate_schedule
 from src.recommendation import build_fixed_schedule_items, recommend_courses
-
+from src.database.loader import load_courses_for_semester, load_time_slots
 from .responses import success_payload
 from .schemas import (
     parse_assignments,
@@ -41,23 +41,8 @@ DEMO_USERS: dict[str, dict[str, str]] = {
 }
 
 
-DEMO_USERS: dict[str, dict[str, str]] = {
-    "9920260001": {
-        "password": "t123456",
-        "role": "teacher",
-        "name": "教师用户",
-    },
-    "2611222": {
-        "password": "s123456",
-        "role": "student",
-        "name": "学生用户",
-    },
-}
-
-
 def health_response() -> dict[str, object]:
     """Return a lightweight service health response."""
-
     data = {
         "status": "ok",
         "service": "nankai-scheduling-api",
@@ -72,38 +57,6 @@ def authenticate_user_payload(payload: Mapping[str, Any]) -> dict[str, object]:
     mirrors the future database-backed user table so the frontend can keep using
     the same API when persistence is added.
     """
-
-    account = str(payload.get("account") or payload.get("user_id") or payload.get("userId") or "").strip()
-    password = str(payload.get("password") or "")
-    if not account or not password:
-        raise ValueError("Missing required field: account or password")
-
-    user = DEMO_USERS.get(account)
-    if user is None or user["password"] != password:
-        return success_payload({
-            "authenticated": False,
-            "reason": "学工号或密码错误",
-        })
-
-    return success_payload({
-        "authenticated": True,
-        "user": {
-            "account": account,
-            "role": user["role"],
-            "name": user["name"],
-        },
-        "token": f"demo-{user['role']}-{account}",
-    })
-
-
-def authenticate_user_payload(payload: Mapping[str, Any]) -> dict[str, object]:
-    """Authenticate a user account and return its portal role.
-
-    The current project stage keeps two demo accounts in memory. The data shape
-    mirrors the future database-backed user table so the frontend can keep using
-    the same API when persistence is added.
-    """
-
     account = str(payload.get("account") or payload.get("user_id") or payload.get("userId") or "").strip()
     password = str(payload.get("password") or "")
     if not account or not password:
@@ -129,9 +82,23 @@ def authenticate_user_payload(payload: Mapping[str, Any]) -> dict[str, object]:
 
 def run_greedy_schedule(payload: Mapping[str, Any]) -> dict[str, object]:
     """Run greedy graph-coloring scheduling from JSON-like payload."""
+    # 课程来源：优先使用 payload 中的 courses，否则从数据库加载
+    if "courses" in payload and payload["courses"]:
+        courses = parse_courses(payload["courses"])
+    else:
+        semester = payload.get("semester")
+        if not semester:
+            raise ValueError("Missing 'semester' parameter or 'courses' list")
+        courses = load_courses_for_semester(semester)
 
-    courses = parse_courses(payload.get("courses"))
-    time_slots = parse_time_slots(payload.get("time_slots") or payload.get("timeSlots"))
+    # 时间槽来源：优先使用 payload 中的，否则从数据库加载
+    if "time_slots" in payload and payload["time_slots"]:
+        time_slots = parse_time_slots(payload["time_slots"])
+    else:
+        time_slots = load_time_slots()
+        if not time_slots:
+            raise ValueError("No time slots available")
+
     options = parse_greedy_options(payload.get("options"))
     result = _run_greedy_with_options(courses, time_slots, options)
 
@@ -159,9 +126,23 @@ def run_greedy_schedule(payload: Mapping[str, Any]) -> dict[str, object]:
 
 def run_backtracking_schedule(payload: Mapping[str, Any]) -> dict[str, object]:
     """Run backtracking scheduling from JSON-like payload."""
+    # 课程来源
+    if "courses" in payload and payload["courses"]:
+        courses = parse_courses(payload["courses"])
+    else:
+        semester = payload.get("semester")
+        if not semester:
+            raise ValueError("Missing 'semester' parameter or 'courses' list")
+        courses = load_courses_for_semester(semester)
 
-    courses = parse_courses(payload.get("courses"))
-    time_slots = parse_time_slots(payload.get("time_slots") or payload.get("timeSlots"))
+    # 时间槽来源
+    if "time_slots" in payload and payload["time_slots"]:
+        time_slots = parse_time_slots(payload["time_slots"])
+    else:
+        time_slots = load_time_slots()
+        if not time_slots:
+            raise ValueError("No time slots available")
+
     max_steps = int(payload.get("max_steps") or payload.get("maxSteps") or 100_000)
     result = backtracking_schedule(courses, time_slots, max_steps=max_steps)
 
@@ -190,9 +171,23 @@ def run_backtracking_schedule(payload: Mapping[str, Any]) -> dict[str, object]:
 
 def compare_schedule_algorithms(payload: Mapping[str, Any]) -> dict[str, object]:
     """Run greedy and backtracking scheduling, then recommend one result."""
+    # 课程来源
+    if "courses" in payload and payload["courses"]:
+        courses = parse_courses(payload["courses"])
+    else:
+        semester = payload.get("semester")
+        if not semester:
+            raise ValueError("Missing 'semester' parameter or 'courses' list")
+        courses = load_courses_for_semester(semester)
 
-    courses = parse_courses(payload.get("courses"))
-    time_slots = parse_time_slots(payload.get("time_slots") or payload.get("timeSlots"))
+    # 时间槽来源
+    if "time_slots" in payload and payload["time_slots"]:
+        time_slots = parse_time_slots(payload["time_slots"])
+    else:
+        time_slots = load_time_slots()
+        if not time_slots:
+            raise ValueError("No time slots available")
+
     max_steps = int(payload.get("max_steps") or payload.get("maxSteps") or 100_000)
     options = parse_greedy_options(payload.get("options"))
 
@@ -269,7 +264,6 @@ def compare_schedule_algorithms(payload: Mapping[str, Any]) -> dict[str, object]
 
 def evaluate_schedule_payload(payload: Mapping[str, Any]) -> dict[str, object]:
     """Evaluate a schedule from JSON-like payload."""
-
     courses = parse_courses(payload.get("courses"))
     assignments = parse_assignments(payload.get("assignments"))
     rooms = parse_rooms(payload.get("rooms"))
@@ -280,7 +274,6 @@ def evaluate_schedule_payload(payload: Mapping[str, Any]) -> dict[str, object]:
 
 def analyze_schedule_payload(payload: Mapping[str, Any]) -> dict[str, object]:
     """Generate AI-assisted scheduling analysis from JSON-like payload."""
-
     courses = parse_courses(payload.get("courses"))
     time_slots = parse_time_slots(payload.get("time_slots") or payload.get("timeSlots"))
     assignments = parse_assignments(payload.get("assignments"))
@@ -298,7 +291,6 @@ def analyze_schedule_payload(payload: Mapping[str, Any]) -> dict[str, object]:
 
 def ai_analyze_schedule_payload(payload: Mapping[str, Any]) -> dict[str, object]:
     """Generate schedule analysis with optional external-LLM wording."""
-
     courses = parse_courses(payload.get("courses"))
     time_slots = parse_time_slots(payload.get("time_slots") or payload.get("timeSlots"))
     assignments = parse_assignments(payload.get("assignments"))
@@ -340,7 +332,6 @@ def ai_analyze_schedule_payload(payload: Mapping[str, Any]) -> dict[str, object]
 
 def ai_answer_question_payload(payload: Mapping[str, Any]) -> dict[str, object]:
     """Answer a scheduling-related question."""
-
     question = str(payload.get("question") or "").strip()
     if not question:
         raise ValueError("Question is required")
@@ -362,7 +353,6 @@ def ai_answer_question_payload(payload: Mapping[str, Any]) -> dict[str, object]:
 
 def ai_explain_schedule_payload(payload: Mapping[str, Any]) -> dict[str, object]:
     """Explain a schedule evaluation result in natural language."""
-
     courses = parse_courses(payload.get("courses"))
     assignments = parse_assignments(payload.get("assignments"))
     rooms = parse_rooms(payload.get("rooms"))
@@ -384,7 +374,6 @@ def ai_explain_schedule_payload(payload: Mapping[str, Any]) -> dict[str, object]
 
 def recommend_courses_payload(payload: Mapping[str, Any]) -> dict[str, object]:
     """Generate student-side personalized course recommendations."""
-
     student = parse_student_profile(payload.get("student"))
     courses = parse_recommendable_courses(
         payload.get("courses")
@@ -462,6 +451,7 @@ def _evaluate_schedule_with_time_slots(courses: object, assignments: object, **k
         kwargs.pop("time_slots", None)
         return evaluate_schedule(courses, assignments, **kwargs)
 
+
 def _run_greedy_with_options(courses: object, time_slots: object, options: object):
     try:
         return greedy_color_schedule(courses, time_slots, options=options)
@@ -469,6 +459,7 @@ def _run_greedy_with_options(courses: object, time_slots: object, options: objec
         if "options" not in str(exc):
             raise
         return greedy_color_schedule(courses, time_slots)
+
 
 def _recommend_algorithm(
     *,
@@ -499,6 +490,7 @@ def _parse_string_list(value: object) -> tuple[str, ...]:
     if isinstance(value, (list, tuple, set, frozenset)):
         return tuple(str(item).strip() for item in value if str(item).strip())
     raise ValueError("Expected a string or list of strings")
+
 
 def _optional_bool(value: object, *, default: bool) -> bool:
     if value in (None, ""):

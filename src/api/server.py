@@ -29,12 +29,24 @@ from .services import (
     run_greedy_schedule,
 )
 
-from src.database.models import CourseDB
+from src.database.models import CourseDB, TeacherDB, ClassroomDB
 from src.database.session import get_session, init_db
+from src.persistence.saver import save_schedule_assignments
 
 JsonHandler = Callable[[Mapping[str, Any]], dict[str, object]]
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 WEB_ROOT = PROJECT_ROOT / "web"
+
+
+def save_schedule_handler(payload: Mapping[str, Any]) -> dict[str, object]:
+    """Save schedule assignments to the database."""
+    semester = payload.get("semester")
+    assignments = payload.get("assignments")
+    if not semester or not assignments:
+        raise ApiError("MISSING_PARAMS", "Need 'semester' and 'assignments'", status=400)
+    save_schedule_assignments(assignments, semester)
+    return {"success": True, "message": "Schedule saved"}
+
 
 POST_ROUTES: dict[str, JsonHandler] = {
     "/auth/login": authenticate_user_payload,
@@ -47,6 +59,7 @@ POST_ROUTES: dict[str, JsonHandler] = {
     "/assistant/ask": ai_answer_question_payload,
     "/assistant/explain": ai_explain_schedule_payload,
     "/student/recommend": recommend_courses_payload,
+    "/schedule/save": save_schedule_handler,
 }
 
 
@@ -70,6 +83,14 @@ class SchedulingApiHandler(BaseHTTPRequestHandler):
             self._handle_get_courses()
             return
 
+        if request_path.startswith("/teachers"):
+            self._handle_get_teachers()
+            return
+
+        if request_path.startswith("/classrooms"):
+            self._handle_get_classrooms()
+            return
+
         if request_path == "/":
             self._redirect("/login/index.html")
             return
@@ -89,19 +110,47 @@ class SchedulingApiHandler(BaseHTTPRequestHandler):
         query = session.query(CourseDB)
         if semester:
             query = query.filter(CourseDB.semester == semester)
-        courses = query.limit(500).all()
+        courses = query.limit(1600).all()
         data = [
             {
                 "course_code": c.course_code,
                 "course_name": c.course_name,
+                "module": c.module,   
                 "teacher_name": c.teacher_name,
                 "weekday": c.weekday,
                 "start_section": c.start_section,
                 "end_section": c.end_section,
                 "classroom": c.classroom,
                 "semester": c.semester,
+                "campus": c.campus,          
+                "quota": c.quota,
             }
             for c in courses
+        ]
+        self._send_json({"success": True, "data": data})
+
+    def _handle_get_teachers(self) -> None:
+        session = get_session()
+        teachers = session.query(TeacherDB).all()
+        data = [
+            {
+                "name": t.name,
+                "college": t.college,
+            }
+            for t in teachers
+        ]
+        self._send_json({"success": True, "data": data})
+
+    def _handle_get_classrooms(self) -> None:
+        session = get_session()
+        classrooms = session.query(ClassroomDB).all()
+        data = [
+            {
+                "name": c.name,
+                "campus": c.campus,
+                "capacity": c.capacity,
+            }
+            for c in classrooms
         ]
         self._send_json({"success": True, "data": data})
 
@@ -139,8 +188,6 @@ class SchedulingApiHandler(BaseHTTPRequestHandler):
         self.send_header("Location", location)
         self.send_header("Content-Length", "0")
         self.end_headers()
-
-
 
     def do_POST(self) -> None:
         handler = POST_ROUTES.get(self.path)
@@ -190,7 +237,6 @@ class SchedulingApiHandler(BaseHTTPRequestHandler):
 
     def log_message(self, format: str, *args: object) -> None:
         """Keep default server output concise."""
-
         return
 
 

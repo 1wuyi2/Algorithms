@@ -150,6 +150,8 @@ const elements = {
   riskBadge: document.querySelector("#riskBadge"),
   teacherIds: document.querySelector("#teacherIds"),
   timeSlotIds: document.querySelector("#timeSlotIds"),
+  semesterSelect: document.querySelector("#semesterSelect"),
+  loadBackendDataBtn: document.querySelector("#loadBackendDataBtn"),
 };
 
 elements.apiBaseLabel.textContent = API_BASE_URL;
@@ -315,6 +317,11 @@ document.body.addEventListener("click", (event) => {
   if (action === "delete") deleteEntity(type, id);
 });
 
+if (elements.loadBackendDataBtn) {
+  elements.loadBackendDataBtn.addEventListener("click", loadBackendData);
+}
+
+
 checkHealth();
 render();
 
@@ -343,7 +350,8 @@ async function runSchedule() {
     return;
   }
 
-  addLog(`开始调用 ${selectedAlgorithm} 排课接口。`);
+  const freeReschedule = Boolean(document.querySelector("#freeRescheduleMode")?.checked);
+  addLog(`开始调用 ${selectedAlgorithm} 排课接口。${freeReschedule ? "模式：重新自动排课，忽略导入时间。" : "模式：尊重导入时间。"}。`);
   try {
     const payload = buildSchedulePayload();
     const endpoint = selectedAlgorithm === "backtracking"
@@ -378,7 +386,31 @@ async function runSchedule() {
 
 async function evaluateCurrentSchedule(options = {}) {
   if (!state.assignments.length) {
-    addLog("评价跳过：当前没有排课结果。");
+    const missingIssues = state.courses.map((course) => ({
+      issue_type: "missing_assignment",
+      severity: "error",
+      message: "A course has no schedule assignment.",
+      related_ids: [course.id],
+    }));
+    state.evaluation = {
+      score: 0,
+      is_feasible: false,
+      issues: missingIssues,
+      errors: missingIssues,
+      warnings: [],
+      metrics: {
+        assigned_course_count: 0,
+        missing_assignment_count: state.courses.length,
+        assignments_with_known_time_slots: 0,
+        teacher_daily_load: {},
+        class_group_daily_load: {},
+        max_teacher_daily_load: 0,
+        max_class_group_daily_load: 0,
+        early_section_count: 0,
+        evening_section_count: 0,
+      },
+    };
+    if (!options.silent) addLog("课表评价完成，当前没有排课结果，评分 0。");
     persistAndRender();
     return;
   }
@@ -422,12 +454,18 @@ async function analyzeCurrentSchedule(options = {}) {
 }
 
 function buildSchedulePayload() {
+  const freeReschedule = Boolean(document.querySelector("#freeRescheduleMode")?.checked);
+  const courses = state.courses.map((course) => normalizeCourseForApi(course, { freeReschedule }));
+  const timeSlots = state.timeSlots.map(normalizeTimeSlotForApi);
+  const rooms = state.rooms.map(normalizeRoomForApi);
   return {
-    courses: state.courses,
-    timeSlots: state.timeSlots,
-    rooms: state.rooms,
+    semester: elements.semesterSelect ? elements.semesterSelect.value : "2025-2026-1", 
+    courses,
+    time_slots: timeSlots,
+    timeSlots,
+    rooms,
     options: {
-      prioritizeFixedTime: document.querySelector("#prioritizeFixedTime").checked,
+      prioritizeFixedTime: !freeReschedule && document.querySelector("#prioritizeFixedTime").checked,
       sortByConflictDegree: document.querySelector("#sortByConflictDegree").checked,
       sortByCandidateCount: document.querySelector("#sortByCandidateCount").checked,
     },
@@ -464,13 +502,27 @@ function applyScheduleResult(result) {
 }
 
 async function apiRequest(path, options = {}) {
-  const response = await fetch(`${API_BASE_URL}${path}`, {
-    headers: { "Content-Type": "application/json" },
-    ...options,
-  });
-  const result = response.status === 204 ? {} : await response.json();
+  let response;
+  try {
+    response = await fetch(`${API_BASE_URL}${path}`, {
+      headers: { "Content-Type": "application/json" },
+      ...options,
+    });
+  } catch (error) {
+    throw new Error(`无法连接后端服务：${error.message}`);
+  }
+
+  let result = {};
+  const rawText = response.status === 204 ? "" : await response.text();
+  if (rawText) {
+    try {
+      result = JSON.parse(rawText);
+    } catch {
+      throw new Error("后端返回了无法解析的数据");
+    }
+  }
   if (!response.ok || result.success === false) {
-    throw new Error(result.error || `HTTP ${response.status}`);
+    throw new Error(result.error || result.message || `HTTP ${response.status}`);
   }
   return result;
 }
@@ -719,7 +771,7 @@ function renderTeachers() {
     return;
   }
   elements.teacherTableBody.innerHTML = state.teachers.map((teacher) => `<tr>
-    <td>${escapeHtml(teacher.id)}</td>
+    <td>${escapeHtml(teacher.employeeId || teacher.account || teacher.id)}</td>
     <td>${escapeHtml(teacher.name)}</td>
     <td>${escapeHtml((teacher.unavailableTimeSlotIds || []).join(", ") || "未设置")}</td>
     <td><div class="row-actions">${actionButtons("teachers", teacher.id)}</div></td>
@@ -938,10 +990,52 @@ function clearRunResults() {
 
 function normalizeAssignments(assignments) {
   return assignments.map((assignment) => ({
-    courseId: assignment.courseId || assignment.course_id,
-    timeSlotId: assignment.timeSlotId || assignment.time_slot_id,
-    roomId: assignment.roomId || assignment.room_id || null,
+    courseId: textField(assignment, "courseId", "course_id", "course_code", "id"),
+    timeSlotId: normalizeSlotId(textField(assignment, "timeSlotId", "time_slot_id", "slotId", "slot_id")),
+    roomId: optionalTextField(assignment, "roomId", "room_id", "classroom", "classroom_name") || null,
   }));
+}
+
+function normalizeCourseForApi(course, options = {}) {
+  const id = textField(course, "id", "course_id", "course_code");
+  const classGroupIds = arrayField(course, "classGroupIds", "class_group_ids", "classGroups", "class_groups", "teachingClassIds");
+  const freeReschedule = Boolean(options.freeReschedule);
+  return {
+    id,
+    name: textField(course, "name", "course_name"),
+    teacherId: textField(course, "teacherId", "teacher_id", "teacherName", "teacher_name") || "未知教师",
+    classGroupIds: classGroupIds.length ? classGroupIds : [`COURSE-${id}`],
+    weeklyHours: numberField(course, "weeklyHours", "weekly_hours") || 1,
+    expectedStudents: optionalNumberField(course, "expectedStudents", "expected_students", "quota"),
+    requiredRoomType: optionalTextField(course, "requiredRoomType", "required_room_type") || "general",
+    requiredCampus: normalizeCampus(optionalTextField(course, "requiredCampus", "required_campus", "campus")),
+    fixedTimeSlotId: freeReschedule ? null : normalizeSlotId(optionalTextField(course, "fixedTimeSlotId", "fixed_time_slot_id")),
+    candidateTimeSlotIds: freeReschedule ? [] : arrayField(course, "candidateTimeSlotIds", "candidate_time_slot_ids").map(normalizeSlotId).filter(Boolean),
+  };
+}
+
+function normalizeTimeSlotForApi(slot) {
+  return {
+    id: normalizeSlotId(textField(slot, "id", "timeSlotId", "time_slot_id")),
+    weekday: numberField(slot, "weekday", "day") || 1,
+    startSection: numberField(slot, "startSection", "start_section", "start") || 1,
+    endSection: numberField(slot, "endSection", "end_section", "end") || numberField(slot, "startSection", "start_section", "start") || 1,
+    startTime: optionalTextField(slot, "startTime", "start_time"),
+    endTime: optionalTextField(slot, "endTime", "end_time"),
+    label: optionalTextField(slot, "label"),
+  };
+}
+
+function normalizeRoomForApi(room) {
+  return {
+    id: textField(room, "id", "roomId", "room_id", "name"),
+    name: textField(room, "name", "roomName", "room_name") || textField(room, "id", "roomId", "room_id"),
+    capacity: numberField(room, "capacity") || 60,
+    roomType: optionalTextField(room, "roomType", "room_type") || "general",
+    campus: normalizeCampus(optionalTextField(room, "campus")),
+    building: optionalTextField(room, "building"),
+    availableTimeSlotIds: arrayField(room, "availableTimeSlotIds", "available_time_slot_ids").map(normalizeSlotId).filter(Boolean),
+  };
 }
 
 function assignmentMatchesFilter(assignment, filter) {
@@ -1051,22 +1145,32 @@ function migrateSavedState(saved) {
     ["G003", "1003"],
   ]);
 
-  const courses = saved.courses.map((course) => {
-    const nextId = normalizeCourseId(course.id);
-    if (nextId !== course.id) {
-      legacyCourseIdMap.set(course.id, nextId);
+  const courses = (saved.courses || []).map((course) => {
+    const originalId = textField(course, "id", "courseId", "course_id", "course_code");
+    const nextId = normalizeCourseId(originalId);
+    if (nextId !== originalId) {
+      legacyCourseIdMap.set(originalId, nextId);
     }
     return {
       ...course,
       id: nextId,
-      teacherId: legacyTeacherIdMap.get(course.teacherId) || course.teacherId,
-      classGroupIds: (course.classGroupIds || []).map((id) => {
+      name: textField(course, "name", "courseName", "course_name") || "未命名课程",
+      teacherId: legacyTeacherIdMap.get(textField(course, "teacherId", "teacher_id", "teacherName", "teacher_name")) ||
+        textField(course, "teacherId", "teacher_id", "teacherName", "teacher_name") ||
+        "未知教师",
+      classGroupIds: arrayField(course, "classGroupIds", "class_group_ids", "classGroups", "class_groups").map((id) => {
         const migratedId = legacyClassGroupIdMap.get(id) || id;
         if (nextId === "COCS0030" && migratedId === "1001") {
           return "2001";
         }
         return migratedId;
       }),
+      weeklyHours: numberField(course, "weeklyHours", "weekly_hours") || 2,
+      expectedStudents: optionalNumberField(course, "expectedStudents", "expected_students", "quota"),
+      requiredRoomType: optionalTextField(course, "requiredRoomType", "required_room_type") || "general",
+      requiredCampus: normalizeCampus(optionalTextField(course, "requiredCampus", "required_campus", "campus")),
+      fixedTimeSlotId: normalizeSlotId(optionalTextField(course, "fixedTimeSlotId", "fixed_time_slot_id")),
+      candidateTimeSlotIds: arrayField(course, "candidateTimeSlotIds", "candidate_time_slot_ids").map(normalizeSlotId).filter(Boolean),
     };
   });
 
@@ -1075,22 +1179,36 @@ function migrateSavedState(saved) {
     courses,
     teachers: (saved.teachers || []).map((teacher) => ({
       ...teacher,
-      id: legacyTeacherIdMap.get(teacher.id) || teacher.id,
+      id: legacyTeacherIdMap.get(textField(teacher, "id", "teacherId", "teacher_id", "name")) ||
+        textField(teacher, "id", "teacherId", "teacher_id", "name"),
+      employeeId: optionalTextField(teacher, "employeeId", "employee_id", "account", "workNo", "work_no") ||
+        (textField(teacher, "id", "teacherId", "teacher_id") === textField(teacher, "name", "teacherName", "teacher_name", "id") ? "x" : textField(teacher, "id", "teacherId", "teacher_id")),
+      name: textField(teacher, "name", "teacherName", "teacher_name", "id"),
+      unavailableTimeSlotIds: arrayField(teacher, "unavailableTimeSlotIds", "unavailable_time_slot_ids").map(normalizeSlotId).filter(Boolean),
     })),
     rooms: (saved.rooms || []).map((room) => ({
       ...room,
-      id: legacyRoomIdMap.get(room.id) || room.id,
+      id: legacyRoomIdMap.get(textField(room, "id", "roomId", "room_id", "name")) ||
+        textField(room, "id", "roomId", "room_id", "name"),
+      name: textField(room, "name", "roomName", "room_name", "classroom") || "未命名教室",
+      capacity: optionalNumberField(room, "capacity") || 60,
+      roomType: optionalTextField(room, "roomType", "room_type") || "general",
+      campus: normalizeCampus(optionalTextField(room, "campus")),
     })),
     assignments: (saved.assignments || []).map((assignment) => ({
       ...assignment,
-      courseId: legacyCourseIdMap.get(assignment.courseId) || assignment.courseId,
-      roomId: legacyRoomIdMap.get(assignment.roomId) || assignment.roomId,
+      courseId: legacyCourseIdMap.get(textField(assignment, "courseId", "course_id", "course_code")) ||
+        textField(assignment, "courseId", "course_id", "course_code"),
+      timeSlotId: normalizeSlotId(textField(assignment, "timeSlotId", "time_slot_id", "slotId", "slot_id")),
+      roomId: legacyRoomIdMap.get(optionalTextField(assignment, "roomId", "room_id", "classroom")) ||
+        optionalTextField(assignment, "roomId", "room_id", "classroom"),
     })),
   };
 }
 
 function normalizeCourseId(courseId) {
-  const value = String(courseId || "");
+  const value = String(courseId || "").trim();
+  if (!value) return "";
   const simpleMatch = value.match(/^C(\d{3})$/);
   if (simpleMatch) {
     return `COCS${simpleMatch[1]}0`;
@@ -1183,4 +1301,188 @@ function escapeHtml(value) {
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#039;");
+}
+
+function responseData(result) {
+  return result && Array.isArray(result.data) ? result.data : result?.data?.items || result?.items || [];
+}
+
+function textField(item, ...keys) {
+  const value = optionalTextField(item, ...keys);
+  return value || "";
+}
+
+function optionalTextField(item, ...keys) {
+  for (const key of keys) {
+    const value = item?.[key];
+    if (value !== undefined && value !== null && String(value).trim() !== "") {
+      return String(value).replace(/\s+/g, " ").trim();
+    }
+  }
+  return "";
+}
+
+function numberField(item, ...keys) {
+  return Number(optionalNumberField(item, ...keys) || 0);
+}
+
+function optionalNumberField(item, ...keys) {
+  for (const key of keys) {
+    const value = item?.[key];
+    if (value !== undefined && value !== null && String(value).trim() !== "") {
+      const numberValue = Number(value);
+      return Number.isFinite(numberValue) ? numberValue : undefined;
+    }
+  }
+  return undefined;
+}
+
+function arrayField(item, ...keys) {
+  for (const key of keys) {
+    const value = item?.[key];
+    if (Array.isArray(value)) return value.map((entry) => String(entry).trim()).filter(Boolean);
+    if (value instanceof Set) return Array.from(value).map((entry) => String(entry).trim()).filter(Boolean);
+    if (typeof value === "string" && value.trim()) {
+      return value.split(/[,\n，、;；]+/).map((entry) => entry.trim()).filter(Boolean);
+    }
+  }
+  return [];
+}
+
+function normalizeCampus(value) {
+  const text = String(value || "").trim().toLowerCase();
+  if (!text) return null;
+  if (text.includes("津南") || text === "jinnan") return "jinnan";
+  if (text.includes("八里台") || text === "balitai") return "balitai";
+  return null;
+}
+
+function normalizeSlotId(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  const match = raw.match(/^D(\d+)-S(\d+)(?:-(\d+))?$/i);
+  if (!match) return raw;
+  const weekday = Number(match[1]);
+  const start = Number(match[2]);
+  const end = Number(match[3] || match[2]);
+  return start === end ? `D${weekday}-S${start}` : `D${weekday}-S${start}-${end}`;
+}
+
+function slotIdFromParts(weekday, startSection, endSection = startSection) {
+  const day = Number(weekday);
+  const start = Number(startSection);
+  const end = Number(endSection || startSection);
+  if (!day || !start || !end) return "";
+  return start === end ? `D${day}-S${start}` : `D${day}-S${start}-${end}`;
+}
+
+function slotFromId(slotId) {
+  const match = String(slotId || "").match(/^D(\d+)-S(\d+)(?:-(\d+))?$/i);
+  if (!match) return null;
+  const weekday = Number(match[1]);
+  const startSection = Number(match[2]);
+  const endSection = Number(match[3] || match[2]);
+  return {
+    id: normalizeSlotId(slotId),
+    weekday,
+    startSection,
+    endSection,
+    label: `${weekdays[weekday - 1] || `周${weekday}`}第${startSection}-${endSection}节`,
+  };
+}
+
+async function loadBackendData() {
+  const semester = elements.semesterSelect.value;
+  addLog(`正在从后端加载学期 ${semester} 的课程数据...`);
+  try {
+    const coursesResult = await apiRequest(`/courses?semester=${encodeURIComponent(semester)}`, { method: "GET" });
+    const backendCourses = responseData(coursesResult).map(mapBackendCourseToTeacher).filter(Boolean);
+    if (!backendCourses.length) {
+      throw new Error(`学期 ${semester} 暂无可用课程数据`);
+    }
+
+    const teachersResult = await apiRequest("/teachers", { method: "GET" });
+    const backendTeachers = responseData(teachersResult).map((teacher) => {
+      const name = textField(teacher, "name", "teacherName", "teacher_name", "id") || "未知教师";
+      const employeeId = textField(teacher, "employeeId", "employee_id", "account", "teacherId", "teacher_id", "workNo", "work_no") || "x";
+      return {
+        id: name,
+        employeeId,
+        name,
+        college: optionalTextField(teacher, "college", "department"),
+        unavailableTimeSlotIds: arrayField(teacher, "unavailableTimeSlotIds", "unavailable_time_slot_ids").map(normalizeSlotId).filter(Boolean),
+      };
+    });
+
+    const teacherMap = new Map(backendTeachers.map((teacher) => [teacher.id, teacher]));
+    backendCourses.forEach((course) => {
+      if (!teacherMap.has(course.teacherId)) {
+        teacherMap.set(course.teacherId, {
+          id: course.teacherId,
+          employeeId: "x",
+          name: course.teacherId,
+          college: "",
+          unavailableTimeSlotIds: [],
+        });
+      }
+    });
+
+    const roomsResult = await apiRequest("/classrooms", { method: "GET" });
+    const backendRooms = responseData(roomsResult).map((room) => {
+      const name = textField(room, "name", "roomName", "room_name", "classroom") || "未命名教室";
+      return {
+        id: textField(room, "id", "roomId", "room_id") || name,
+        name,
+        capacity: optionalNumberField(room, "capacity") || 60,
+        campus: normalizeCampus(optionalTextField(room, "campus")),
+        roomType: optionalTextField(room, "roomType", "room_type") || "general",
+        building: optionalTextField(room, "building"),
+      };
+    });
+    const importedSlots = backendCourses
+      .flatMap((course) => [course.fixedTimeSlotId, ...(course.candidateTimeSlotIds || [])])
+      .filter(Boolean)
+      .map(slotFromId)
+      .filter(Boolean);
+    const slotMap = new Map([...state.timeSlots, ...importedSlots].map((slot) => [slot.id, slot]));
+
+    state.courses = backendCourses;
+    state.teachers = Array.from(teacherMap.values());
+    state.rooms = backendRooms;
+    state.timeSlots = Array.from(slotMap.values()).sort(compareSlots);
+    clearRunResults();
+    const dataSourceBadge = document.querySelector("#dataSourceBadge");
+    if (dataSourceBadge) dataSourceBadge.textContent = `数据来源：后端课程库 (${semester})`;
+    addLog(`已从后端加载 ${state.courses.length} 门课程、${state.teachers.length} 位教师、${state.rooms.length} 间教室。`);
+    persistAndRender();
+  } catch (error) {
+    addLog(`加载后端数据失败：${error.message}`);
+  }
+}
+
+function mapBackendCourseToTeacher(row) {
+  const id = textField(row, "id", "courseId", "course_id", "course_code");
+  const name = textField(row, "name", "courseName", "course_name").replace(/\n/g, "");
+  if (!id || !name) return null;
+  const weekday = optionalNumberField(row, "weekday", "day");
+  const startSection = optionalNumberField(row, "startSection", "start_section", "start");
+  const endSection = optionalNumberField(row, "endSection", "end_section", "end") || startSection;
+  const fixedSlot = normalizeSlotId(optionalTextField(row, "fixedTimeSlotId", "fixed_time_slot_id"));
+  const explicitCandidates = arrayField(row, "candidateTimeSlotIds", "candidate_time_slot_ids").map(normalizeSlotId).filter(Boolean);
+  const importedSlot = slotIdFromParts(weekday, startSection, endSection);
+  const teacherName = textField(row, "teacherId", "teacher_id", "teacherName", "teacher_name") || "未知教师";
+  return {
+    id,
+    name,
+    teacherId: teacherName,
+    classGroupIds: arrayField(row, "classGroupIds", "class_group_ids", "teachingClassIds", "teaching_class_ids").length
+      ? arrayField(row, "classGroupIds", "class_group_ids", "teachingClassIds", "teaching_class_ids")
+      : [`COURSE-${id}`],
+    weeklyHours: numberField(row, "weeklyHours", "weekly_hours") || Math.max((endSection || startSection || 1) - (startSection || 1) + 1, 1),
+    expectedStudents: optionalNumberField(row, "expectedStudents", "expected_students", "quota"),
+    requiredRoomType: optionalTextField(row, "requiredRoomType", "required_room_type") || "general",
+    requiredCampus: normalizeCampus(optionalTextField(row, "requiredCampus", "required_campus", "campus")),
+    fixedTimeSlotId: fixedSlot || null,
+    candidateTimeSlotIds: fixedSlot ? [fixedSlot] : explicitCandidates.length ? explicitCandidates : importedSlot ? [importedSlot] : [],
+  };
 }

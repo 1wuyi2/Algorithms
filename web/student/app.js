@@ -170,7 +170,54 @@ let recommendations = [];
 let selectedScheduleMode = "week";
 let activeStudentView = "profile";
 let selectionFeedback = null;
-
+const compulsoryGeneralCourseNames = [
+  "新生研讨课",
+  "马克思主义基本原理",
+  "习近平新时代中国特色社会主义思想概论",
+  "形势与政策",
+  "公选实践",
+  "中国近现代史纲要",
+  "思想道德与法治",
+  "毛泽东思想和中国特色社会主义理论体系概论",
+  "军事技能训练",
+  "军事理论",
+  "大学生心理健康",
+  "太极拳",
+  "乒乓球初级",
+  "网球初级",
+  "排球初级",
+  "英语口语与写作高阶I",
+  "英语口语与写作高阶II",
+  "英语口语与写作高阶III",
+  "高级英语",
+  "大学语文",
+  "高等数学（A类）I",
+  "高等数学（A类）II",
+  "大学基础物理实验",
+  "体育理论与训练6-1",
+  "瑜伽",
+  "国际象棋初级",
+  "健美操初级",
+  "啦啦操初级",
+  "篮球初级",
+  "健身健美初级",
+  "排球初级",
+  "跆拳道初级",
+  "体育舞蹈（拉丁舞）",
+  "体育保健 Ⅲ",
+  "游泳初级",
+  "游泳高级",
+  "羽毛球初级",
+  "中国象棋初级",
+  "足球初级",
+  "花式跳绳",
+  "重剑初级",
+  "滑冰与轮滑（轮滑球）",
+  "太极功夫扇",
+  "气排球",
+  "体育理论与训练7",
+  "健身养生功",
+];
 const elements = {
   appShell: document.querySelector(".app-shell"),
   navTabs: document.querySelectorAll(".nav-tab"),
@@ -281,16 +328,28 @@ document.body.addEventListener("click", (event) => {
   const button = event.target.closest("[data-action]");
   if (!button) return;
   const { action, courseId } = button.dataset;
-  if (action === "complete") toggleSet(state.completedCourseIds, courseId);
-  if (action === "fixed") toggleSet(state.fixedCourseIds, courseId);
+  if (action === "complete") {
+    toggleSet(state.completedCourseIds, courseId);
+    if (state.completedCourseIds.some((id) => normalizeId(id) === normalizeId(courseId))) {
+      state.fixedCourseIds = state.fixedCourseIds.filter((id) => normalizeId(id) !== normalizeId(courseId));
+      state.currentAssignments = state.currentAssignments.filter((item) => normalizeId(item.courseId || item.course_id) !== normalizeId(courseId));
+    }
+  }
+  if (action === "fixed") {
+    toggleSet(state.fixedCourseIds, courseId);
+    if (state.fixedCourseIds.some((id) => normalizeId(id) === normalizeId(courseId))) {
+      state.completedCourseIds = state.completedCourseIds.filter((id) => normalizeId(id) !== normalizeId(courseId));
+      state.currentAssignments = state.currentAssignments.filter((item) => normalizeId(item.courseId || item.course_id) !== normalizeId(courseId));
+    }
+  }
   if (action === "recommend-one") recommendOne(courseId);
   if (action === "select-course") selectRecommendedCourse(courseId);
   if (action === "drop-course") dropSelectedCourse(courseId);
   recommendations = recommendations.map((item) => ({
     ...item,
-    is_completed: state.completedCourseIds.includes(item.course_id),
+    is_completed: state.completedCourseIds.some((id) => normalizeId(id) === normalizeId(item.course_id)),
     is_currently_selected: isCourseSelected(item.course_id),
-    is_fixed_selected: state.fixedCourseIds.includes(item.course_id),
+    is_fixed_selected: state.fixedCourseIds.some((id) => normalizeId(id) === normalizeId(item.course_id)),
   }));
   persistAndRender();
 });
@@ -302,18 +361,14 @@ async function generateRecommendations() {
   setLoading(true);
   setStatus("正在生成推荐...");
   try {
-    const response = await fetch(`${API_BASE_URL}/student/recommend`, {
+    const result = await apiRequest("/student/recommend", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     });
-    const result = await response.json();
-    if (!response.ok || result.success === false) {
-      throw new Error(result.error || "推荐接口返回错误");
-    }
-    recommendations = result.recommendations || result.data?.recommendations || [];
+    const data = result.data || result;
+    recommendations = data.recommendations || result.recommendations || [];
     state.lastSource = "后端推荐接口";
-    setStatus(`已调用后端接口，从 ${result.candidate_count ?? state.courses.length} 门候选课程中生成推荐。`);
+    setStatus(`已调用后端接口，从 ${data.candidate_count ?? state.courses.length} 门候选课程中生成推荐。`);
   } catch (error) {
     recommendations = localRecommend(payload);
     state.lastSource = "前端备用规则";
@@ -332,12 +387,8 @@ async function loadCoursesFromBackend() {
   elements.loadCoursesButton.disabled = true;
   setStatus("正在读取后端课程库...");
   try {
-    const response = await fetch(`${API_BASE_URL}${path}`);
-    const result = await response.json();
-    if (!response.ok || result.success === false) {
-      throw new Error(result.error || `HTTP ${response.status}`);
-    }
-    const rows = result.data || [];
+    const result = await apiRequest(path, { method: "GET" });
+    const rows = Array.isArray(result.data) ? result.data : result.data?.items || result.items || [];
     const mappedCourses = rows.map(mapBackendCourse).filter(Boolean);
     if (!mappedCourses.length) {
       throw new Error("后端暂无可用课程数据");
@@ -386,7 +437,7 @@ function selectRecommendedCourse(courseId) {
   state.currentAssignments.push({
     courseId: course.id,
     courseName: course.name,
-    timeSlotId: course.timeSlotId,
+    timeSlotId: normalizeSlotId(course.timeSlotId),
     teacherName: course.teacherName,
     classroom: course.classroom,
     courseType: normalizeCourseCategory(course.category || course.courseType, course.name),
@@ -402,13 +453,13 @@ function selectRecommendedCourse(courseId) {
 }
 
 function dropSelectedCourse(courseId) {
-  const selected = state.currentAssignments.find((item) => item.courseId === courseId && item.selectedByStudent);
+  const selected = state.currentAssignments.find((item) => normalizeId(item.courseId || item.course_id) === normalizeId(courseId) && item.selectedByStudent);
   if (!selected) {
     setSelectionStatus("该课程不是通过推荐选入的课程，不能在这里退课。", "danger", courseId);
     return;
   }
-  state.currentAssignments = state.currentAssignments.filter((item) => !(item.courseId === courseId && item.selectedByStudent));
-  recommendations = recommendations.map((item) => item.course_id === courseId
+  state.currentAssignments = state.currentAssignments.filter((item) => !(normalizeId(item.courseId || item.course_id) === normalizeId(courseId) && item.selectedByStudent));
+  recommendations = recommendations.map((item) => normalizeId(item.course_id || item.courseId) === normalizeId(courseId)
     ? {
         ...item,
         is_currently_selected: false,
@@ -419,13 +470,13 @@ function dropSelectedCourse(courseId) {
 }
 
 function validateCourseSelection(course) {
-  if (state.completedCourseIds.includes(course.id)) {
+  if (state.completedCourseIds.some((id) => normalizeId(id) === normalizeId(course.id))) {
     return { ok: false, reason: `${course.name} 已标记为已修课程，不能重复选课。` };
   }
   if (isCourseSelected(course.id)) {
     return { ok: false, reason: `${course.name} 已经在当前课表中，不能重复选课。` };
   }
-  if (state.fixedCourseIds.includes(course.id)) {
+  if (state.fixedCourseIds.some((id) => normalizeId(id) === normalizeId(course.id))) {
     return { ok: false, reason: `${course.name} 已经是固定必选课程，不需要再次选课。` };
   }
 
@@ -454,7 +505,7 @@ function validateCourseSelection(course) {
 
 function findConflict(course, items) {
   return items.find((item) => {
-    if (item.id === course.id || item.courseId === course.id || item.course_id === course.id) return false;
+    if (normalizeId(item.id || item.courseId || item.course_id) === normalizeId(course.id || course.courseId || course.course_id)) return false;
     const left = blockFrom(course);
     const right = blockFrom(item);
     return left && right && blocksOverlap(left, right);
@@ -469,17 +520,17 @@ function courseFromRecommendation(courseId) {
 
 function recommendationToCourse(item) {
   return {
-    id: item.course_id,
-    name: item.course_name,
-    timeSlotId: item.time_slot_id,
-    category: normalizeCourseCategory(item.course_type || item.category, item.course_name),
-    courseType: normalizeCourseCategory(item.course_type || item.category, item.course_name),
+    id: textField(item, "course_id", "courseId", "id"),
+    name: textField(item, "course_name", "courseName", "name"),
+    timeSlotId: normalizeSlotId(firstPresent(item, "time_slot_id", "timeSlotId", "slot_id", "slotId")),
+    category: normalizeCourseCategory(firstPresent(item, "course_type", "courseType", "category"), textField(item, "course_name", "courseName", "name")),
+    courseType: normalizeCourseCategory(firstPresent(item, "course_type", "courseType", "category"), textField(item, "course_name", "courseName", "name")),
     credit: item.credit,
-    teacherName: item.teacher_name,
-    classroom: item.classroom,
-    weekday: item.weekday,
-    startSection: item.start_section,
-    endSection: item.end_section,
+    teacherName: textField(item, "teacher_name", "teacherName", "teacher"),
+    classroom: textField(item, "classroom", "room", "location"),
+    weekday: optionalNumber(firstPresent(item, "weekday", "day")),
+    startSection: optionalNumber(firstPresent(item, "start_section", "startSection", "start")),
+    endSection: optionalNumber(firstPresent(item, "end_section", "endSection", "end")),
   };
 }
 
@@ -590,8 +641,8 @@ function renderCatalog() {
 }
 
 function renderCourseCard(course) {
-  const completed = state.completedCourseIds.includes(course.id);
-  const fixed = state.fixedCourseIds.includes(course.id);
+  const completed = state.completedCourseIds.some((id) => normalizeId(id) === normalizeId(course.id));
+  const fixed = state.fixedCourseIds.some((id) => normalizeId(id) === normalizeId(course.id));
   const selected = isCourseSelected(course.id);
   const conflicted = hasTimeConflict(course, busyItemsForCourse(course.id));
   const category = normalizeCourseCategory(course.category || course.courseType, course.name);
@@ -935,7 +986,7 @@ function getFilteredCourses() {
 function localRecommend(payload) {
   const busyItems = [
     ...payload.currentAssignments,
-    ...payload.courses.filter((course) => payload.fixedCourseIds.includes(course.id)),
+    ...payload.courses.filter((course) => payload.fixedCourseIds.some((id) => normalizeId(id) === normalizeId(course.id))),
   ];
   return payload.courses
     .map((course) => {
@@ -944,11 +995,13 @@ function localRecommend(payload) {
       const matchedInterestTags = (course.interestTags || []).filter((tag) =>
         payload.student.interests.some((interest) => interest.toLowerCase() === tag.toLowerCase()),
       );
-      const missing = (course.prerequisiteCourseIds || []).filter((id) => !payload.student.completedCourseIds.includes(id));
+      const missing = (course.prerequisiteCourseIds || []).filter((id) =>
+        !payload.student.completedCourseIds.some((completedId) => normalizeId(completedId) === normalizeId(id)),
+      );
       const hasConflict = hasTimeConflict(course, busyItems);
-      const isCompleted = payload.student.completedCourseIds.includes(course.id);
-      const isFixed = payload.fixedCourseIds.includes(course.id);
-      const isSelected = payload.currentAssignments.some((item) => item.courseId === course.id || item.course_id === course.id);
+      const isCompleted = payload.student.completedCourseIds.some((id) => normalizeId(id) === normalizeId(course.id));
+      const isFixed = payload.fixedCourseIds.some((id) => normalizeId(id) === normalizeId(course.id));
+      const isSelected = payload.currentAssignments.some((item) => normalizeId(item.courseId || item.course_id || item.id) === normalizeId(course.id));
 
       if ((course.majorTags || []).includes(payload.student.major)) {
         score += 30;
@@ -1034,29 +1087,119 @@ function courseSummary(course) {
   return parts.join("；") || "暂无额外限制";
 }
 
+async function apiRequest(path, options = {}) {
+  let response;
+  try {
+    response = await fetch(`${API_BASE_URL}${path}`, {
+      headers: { "Content-Type": "application/json" },
+      ...options,
+    });
+  } catch (error) {
+    throw new Error(`无法连接后端服务：${error.message}`);
+  }
+
+  let result = {};
+  const rawText = response.status === 204 ? "" : await response.text();
+  if (rawText) {
+    try {
+      result = JSON.parse(rawText);
+    } catch {
+      throw new Error("后端返回了无法解析的数据");
+    }
+  }
+  if (!response.ok || result.success === false) {
+    throw new Error(result.error || result.message || `HTTP ${response.status}`);
+  }
+  return result;
+}
+
+function firstPresent(item, ...keys) {
+  for (const key of keys) {
+    const value = item?.[key];
+    if (value !== undefined && value !== null && String(value).trim() !== "") {
+      return value;
+    }
+  }
+  return "";
+}
+
+function textField(item, ...keys) {
+  const value = firstPresent(item, ...keys);
+  return value === "" ? "" : String(value).replace(/\s+/g, " ").trim();
+}
+
+function arrayField(item, ...keys) {
+  for (const key of keys) {
+    const value = item?.[key];
+    if (Array.isArray(value)) return value.map((entry) => String(entry).trim()).filter(Boolean);
+    if (typeof value === "string" && value.trim()) {
+      return value.split(/[,\n，、;；]+/).map((entry) => entry.trim()).filter(Boolean);
+    }
+  }
+  return [];
+}
+
+function normalizeId(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function normalizeSlotId(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  const match = raw.match(/^D(\d+)-S(\d+)(?:-(\d+))?$/i);
+  if (!match) return raw;
+  const weekday = Number(match[1]);
+  const start = Number(match[2]);
+  const end = Number(match[3] || match[2]);
+  return start === end ? `D${weekday}-S${start}` : `D${weekday}-S${start}-${end}`;
+}
+
 function mapBackendCourse(row) {
-  const id = String(row.course_code || row.id || "").trim();
-  const name = String(row.course_name || row.name || "").trim();
+  const id = textField(row, "id", "courseId", "course_id", "course_code");
+  const name = textField(row, "name", "courseName", "course_name").replace(/\n/g, "");
   if (!id || !name) return null;
-  const weekday = optionalNumber(row.weekday);
-  const startSection = optionalNumber(row.start_section || row.startSection);
-  const endSection = optionalNumber(row.end_section || row.endSection) || startSection;
+  const weekday = optionalNumber(firstPresent(row, "weekday", "day"));
+  const startSection = optionalNumber(firstPresent(row, "startSection", "start_section", "start"));
+  const endSection = optionalNumber(firstPresent(row, "endSection", "end_section", "end")) || startSection;
+  const backendSlot = normalizeSlotId(firstPresent(row, "timeSlotId", "time_slot_id", "slotId", "slot_id"));
+
+  // 清理 module 字段中的换行符和空格
+  const rawModule = textField(row, "module", "category", "course_type", "courseType");
+  const cleanedModule = rawModule.replace(/\s+/g, "");
+  const generalModules = [
+    "公能素质和服务中国",
+    "艺术审美与文化思辨",
+    "科学精神与健康生活",
+    "社会发展与国家治理",
+    "工程素养与未来科技",
+    "世界文明与国际视野"
+  ];
+
+  let category;
+  if (generalModules.some(keyword => cleanedModule.includes(keyword))) {
+    category = "通识选修";
+  } else if (compulsoryGeneralCourseNames.some(cn => name.includes(cn))) {
+    category = "通识必修";
+  } else {
+    category = inferCourseCategory(row.category || row.course_type || row.courseType, name);
+  }
+
   return {
     id,
     name,
-    majorTags: [state.profile.major],
-    gradeTags: [state.profile.grade],
-    interestTags: inferInterestTags(name),
-    prerequisiteCourseIds: [],
-    timeSlotId: weekday && startSection ? `D${weekday}-S${startSection}-${endSection}` : undefined,
-    category: inferCourseCategory(row.category || row.course_type || row.courseType, name),
-    credit: undefined,
-    teacherName: row.teacher_name || row.teacherName || "教师待定",
-    classroom: row.classroom || "教室待定",
+    majorTags: arrayField(row, "majorTags", "major_tags").length ? arrayField(row, "majorTags", "major_tags") : [state.profile.major],
+    gradeTags: arrayField(row, "gradeTags", "grade_tags").length ? arrayField(row, "gradeTags", "grade_tags") : [state.profile.grade],
+    interestTags: arrayField(row, "interestTags", "interest_tags").length ? arrayField(row, "interestTags", "interest_tags") : inferInterestTags(name),
+    prerequisiteCourseIds: arrayField(row, "prerequisiteCourseIds", "prerequisite_course_ids", "prerequisites"),
+    timeSlotId: backendSlot || (weekday && startSection ? normalizeSlotId(`D${weekday}-S${startSection}-${endSection}`) : undefined),
+    category: category,
+    credit: optionalNumber(firstPresent(row, "credit", "credits")),
+    teacherName: textField(row, "teacherName", "teacher_name", "teacher", "teacherId", "teacher_id") || "教师待定",
+    classroom: textField(row, "classroom", "room", "roomName", "room_name", "location") || "教室待定",
     weekday,
     startSection,
     endSection,
-    semester: row.semester,
+    semester: textField(row, "semester"),
   };
 }
 
@@ -1075,18 +1218,18 @@ function hasTimeConflict(course, items) {
   const block = blockFrom(course);
   if (!block) return false;
   return items.some((item) => {
-    if (item.id === course.id || item.courseId === course.id || item.course_id === course.id) return false;
+    if (normalizeId(item.id || item.courseId || item.course_id) === normalizeId(course.id || course.courseId || course.course_id)) return false;
     const other = blockFrom(item);
     return other && blocksOverlap(block, other);
   });
 }
 
 function blockFrom(item) {
-  const timeSlotId = item.timeSlotId || item.time_slot_id;
+  const timeSlotId = normalizeSlotId(firstPresent(item, "timeSlotId", "time_slot_id", "slotId", "slot_id"));
   const parsed = parseSlot(timeSlotId);
-  const weekday = item.weekday || parsed.weekday;
-  const startSection = item.startSection || item.start_section || parsed.startSection;
-  const endSection = item.endSection || item.end_section || parsed.endSection || startSection;
+  const weekday = optionalNumber(firstPresent(item, "weekday", "day")) || parsed.weekday;
+  const startSection = optionalNumber(firstPresent(item, "startSection", "start_section", "start")) || parsed.startSection;
+  const endSection = optionalNumber(firstPresent(item, "endSection", "end_section", "end")) || parsed.endSection || startSection;
   if (!timeSlotId && !weekday) return null;
   return { timeSlotId, weekday, startSection, endSection };
 }
@@ -1099,13 +1242,13 @@ function blocksOverlap(left, right) {
 }
 
 function formatCourseTime(item) {
-  const weekday = item.weekday;
-  const start = item.startSection || item.start_section;
-  const end = item.endSection || item.end_section;
+  const weekday = optionalNumber(firstPresent(item, "weekday", "day"));
+  const start = optionalNumber(firstPresent(item, "startSection", "start_section", "start"));
+  const end = optionalNumber(firstPresent(item, "endSection", "end_section", "end")) || start;
   if (weekday && start && end) {
     return `周${"一二三四五六日"[Number(weekday) - 1] || weekday} 第 ${start}-${end} 节`;
   }
-  return formatSlot(item.time_slot_id || item.timeSlotId);
+  return formatSlot(firstPresent(item, "time_slot_id", "timeSlotId", "slot_id", "slotId"));
 }
 
 function formatSlot(slotId) {
@@ -1125,11 +1268,12 @@ function parseSlot(slotId) {
 }
 
 function findCourse(courseId) {
-  return state.courses.find((course) => course.id === courseId);
+  return state.courses.find((course) => normalizeId(course.id) === normalizeId(courseId));
 }
 
 function toggleSet(list, value) {
-  const index = list.indexOf(value);
+  const target = normalizeId(value);
+  const index = list.findIndex((item) => normalizeId(item) === target);
   if (index >= 0) {
     list.splice(index, 1);
   } else {
@@ -1153,14 +1297,16 @@ function setSelectionStatus(message, mode = "neutral", courseId = null) {
 }
 
 function isCourseSelected(courseId) {
-  return state.currentAssignments.some((item) => item.courseId === courseId || item.course_id === courseId);
+  const target = normalizeId(courseId);
+  return state.currentAssignments.some((item) => normalizeId(item.courseId || item.course_id || item.id) === target);
 }
 
 function busyItemsForCourse(courseId) {
+  const target = normalizeId(courseId);
   return [
     ...state.currentAssignments,
     ...state.fixedCourseIds
-      .filter((id) => id !== courseId)
+      .filter((id) => normalizeId(id) !== target)
       .map(findCourse)
       .filter(Boolean),
   ];

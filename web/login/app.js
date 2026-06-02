@@ -20,21 +20,18 @@ form.addEventListener("submit", async (event) => {
   const password = String(formData.get("password") || "");
 
   try {
-    const response = await fetch(`${API_BASE_URL}/auth/login`, {
+    const result = await apiRequest("/auth/login", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ account, password }),
     });
-    const result = await response.json();
-    if (!response.ok || result.success === false) {
-      throw new Error(result.error || `HTTP ${response.status}`);
-    }
-    if (!result.authenticated || !result.user) {
-      showMessage(result.reason || "学工号或密码错误。");
+    const payload = result.data || result;
+    const user = payload.user || result.user;
+    if (!payload.authenticated || !user) {
+      showMessage(payload.reason || result.reason || "学工号或密码错误。");
       return;
     }
 
-    const target = roleTargets[result.user.role];
+    const target = roleTargets[user.role];
     if (!target) {
       showMessage("账号身份暂不支持登录。");
       return;
@@ -43,10 +40,10 @@ form.addEventListener("submit", async (event) => {
     localStorage.setItem(
       AUTH_KEY,
       JSON.stringify({
-        account: result.user.account,
-        role: result.user.role,
-        name: result.user.name,
-        token: result.token,
+        account: user.account || account,
+        role: user.role,
+        name: user.name || "用户",
+        token: payload.token || result.token,
         loginAt: new Date().toISOString(),
       }),
     );
@@ -59,4 +56,30 @@ form.addEventListener("submit", async (event) => {
 function showMessage(text, mode = "error") {
   message.textContent = text;
   message.className = `message ${mode}`;
+}
+
+async function apiRequest(path, options = {}) {
+  let response;
+  try {
+    response = await fetch(`${API_BASE_URL}${path}`, {
+      headers: { "Content-Type": "application/json" },
+      ...options,
+    });
+  } catch (error) {
+    throw new Error(`无法连接后端服务：${error.message}`);
+  }
+
+  let result = {};
+  const rawText = await response.text();
+  if (rawText) {
+    try {
+      result = JSON.parse(rawText);
+    } catch {
+      throw new Error("后端返回了无法解析的数据");
+    }
+  }
+  if (!response.ok || result.success === false) {
+    throw new Error(result.error || result.message || `HTTP ${response.status}`);
+  }
+  return result;
 }
