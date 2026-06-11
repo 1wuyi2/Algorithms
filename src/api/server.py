@@ -108,51 +108,60 @@ class SchedulingApiHandler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         params = parse_qs(parsed.query)
         semester = params.get("semester", [None])[0]
-        query = session.query(CourseDB)
-        if semester:
-            query = query.filter(CourseDB.semester == semester)
-        courses = query.limit(1600).all()
-        data = [
-            {
-                "course_code": c.course_code,
-                "course_name": c.course_name,
-                "module": c.module,   
-                "teacher_name": c.teacher_name,
-                "weekday": c.weekday,
-                "start_section": c.start_section,
-                "end_section": c.end_section,
-                "classroom": c.classroom,
-                "semester": c.semester,
-                "campus": c.campus,          
-                "quota": c.quota,
-            }
-            for c in courses
-        ]
+        try:
+            query = session.query(CourseDB)
+            if semester:
+                query = query.filter(CourseDB.semester == semester)
+            courses = query.limit(1600).all()
+            data = [
+                {
+                    "course_code": c.course_code,
+                    "course_name": c.course_name,
+                    "module": c.module,
+                    "teacher_name": c.teacher_name,
+                    "weekday": c.weekday,
+                    "start_section": c.start_section,
+                    "end_section": c.end_section,
+                    "classroom": c.classroom,
+                    "semester": c.semester,
+                    "campus": c.campus,
+                    "quota": c.quota,
+                }
+                for c in courses
+            ]
+        finally:
+            session.close()
         self._send_json({"success": True, "data": data})
 
     def _handle_get_teachers(self) -> None:
         session = get_session()
-        teachers = session.query(TeacherDB).all()
-        data = [
-            {
-                "name": t.name,
-                "college": t.college,
-            }
-            for t in teachers
-        ]
+        try:
+            teachers = session.query(TeacherDB).all()
+            data = [
+                {
+                    "name": t.name,
+                    "college": t.college,
+                }
+                for t in teachers
+            ]
+        finally:
+            session.close()
         self._send_json({"success": True, "data": data})
 
     def _handle_get_classrooms(self) -> None:
         session = get_session()
-        classrooms = session.query(ClassroomDB).all()
-        data = [
-            {
-                "name": c.name,
-                "campus": c.campus,
-                "capacity": c.capacity,
-            }
-            for c in classrooms
-        ]
+        try:
+            classrooms = session.query(ClassroomDB).all()
+            data = [
+                {
+                    "name": c.name,
+                    "campus": c.campus,
+                    "capacity": c.capacity,
+                }
+                for c in classrooms
+            ]
+        finally:
+            session.close()
         self._send_json({"success": True, "data": data})
 
     def _handle_static_file(self, request_path: str) -> bool:
